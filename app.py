@@ -283,7 +283,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
                 val = float(item.get("Valor", 0.0))
                 dados_orc_resumo.append([
                     Paragraph(f"➕ Extra: {desc}", td_style),
-                    Paragraph("Item Solicitado Adicionalmente", td_style),
+                    Paragraph("Item Solicitado ", td_style),
                     Paragraph(f"R$ {val:,.2f}", td_bold)
                 ])
 
