@@ -1,15 +1,16 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 from datetime import datetime
 
 # Configuração da página
 st.set_page_config(
-    page_title="Gestão de Faturamento - Champions League Experience",
+    page_title="MGL Produções - Gestão de Faturamento",
     page_icon="🏆",
     layout="wide"
 )
 
-# Estilização CSS Personalizada (Cores Institucionais)
+# Estilização CSS Personalizada (Inspirado nas cores MGL Produções)
 st.markdown("""
     <style>
     .main {
@@ -30,18 +31,20 @@ st.markdown("""
         color: #3B2319;
         font-weight: bold;
     }
+    .css-1r6594q {
+        color: #3B2319;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- CABEÇALHO COM LOGÓTIPO / ARTE ---
+# --- CABEÇALHO COM LOGO E IDENTIDADE ---
 col_logo, col_tit = st.columns([1, 4])
 with col_logo:
-    # Pode substituir pelo URL da sua imagem/logo oficial
-    st.image("https://img.icons8.com/color/144/trophy.png", width=110)
+    st.image("https://img.icons8.com/color/144/trophy.png", width=100)
 
 with col_tit:
-    st.title("🏆 Champions League Experience Brasil")
-    st.subheader("Painel de Gestão de Faturamento & Operações Cênicas")
+    st.title("🏆 MGL Produções")
+    st.subheader("Painel de Gestão de Faturamento — Complexo Champions League")
 
 st.markdown("---")
 
@@ -61,7 +64,13 @@ with st.expander("➕ Cadastrar Novo Faturamento / Evento", expanded=True):
         horario = st.text_input("Horário (ex: 08h às 18h)")
         
     with col2:
-        local = st.selectbox("Local / Espaço", ["Arena", "Sala Glass", "Rooftop Maior", "Rooftop Menor"])
+        locais_selecionados = st.multiselect(
+            "Complexo Champions League (Selecione um ou mais espaços)",
+            ["Arena", "Sala Glass", "Rooftop Maior", "Rooftop Menor"],
+            default=["Arena"]
+        )
+        local_str = ", ".join(locais_selecionados) if locais_selecionados else "Não informado"
+        
         transmissao = st.radio("Transmissão Painéis & TVs do Complexo?", ["Sim", "Não"], horizontal=True)
         
     with col3:
@@ -85,12 +94,14 @@ with st.expander("➕ Cadastrar Novo Faturamento / Evento", expanded=True):
         desc_extra = st.text_input("Descrição da Contratação Extra", placeholder="Ex: Iluminação cênica adicional, diária extra...")
         
     with col_v3:
+        faturamento_bruto_calc = val_aprovado + contratacao_extra
+        imposto_calc = faturamento_bruto_calc * 0.10
         st.info("💡 **Resumo da Receita**\n"
-                f"• Aprovado + Extra: **R$ {val_aprovado + contratacao_extra:,.2f}**\n"
-                f"• Imposto NF (10%): **R$ {(val_aprovado + contratacao_extra) * 0.10:,.2f}**")
+                f"• Aprovado + Extra: **R$ {faturamento_bruto_calc:,.2f}**\n"
+                f"• Imposto NF (10%): **R$ {imposto_calc:,.2f}**")
 
-    st.markdown("### 👥 4. Custos Operacionais")
-    col_c1, col_c2, col_c3, col_c4 = st.columns(4)
+    st.markdown("### 👥 4. Custos Operacionais & Logística")
+    col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns(5)
     with col_c1:
         custo_resolume = st.number_input("Custo Resolume / PPT (R$)", min_value=0.0, step=50.0)
     with col_c2:
@@ -99,6 +110,8 @@ with st.expander("➕ Cadastrar Novo Faturamento / Evento", expanded=True):
         custo_sonorizacao = st.number_input("Custo Sonorização (R$)", min_value=0.0, step=50.0)
     with col_c4:
         custo_diretor = st.number_input("Custo Diretor Técnico (R$)", min_value=0.0, step=50.0)
+    with col_c5:
+        custo_logistica = st.number_input("Logística (Combustível / Estac.) (R$)", min_value=0.0, step=20.0)
 
     st.markdown("### 🗓️ 5. Prazos e Observações")
     col_d1, col_d2 = st.columns(2)
@@ -112,16 +125,16 @@ with st.expander("➕ Cadastrar Novo Faturamento / Evento", expanded=True):
     # CÁLCULOS AUTOMÁTICOS
     faturamento_bruto = val_aprovado + contratacao_extra
     imposto_nf = faturamento_bruto * 0.10
-    total_custos_op = custo_resolume + custo_iluminacao + custo_sonorizacao + custo_diretor
+    total_custos_op = custo_resolume + custo_iluminacao + custo_sonorizacao + custo_diretor + custo_logistica
     lucro_real = faturamento_bruto - imposto_nf - total_custos_op
 
     st.markdown("---")
-    if st.button("💾 Salvar Registos de Faturamento", use_container_width=True):
+    if st.button("💾 Salvar Registros de Faturamento", use_container_width=True):
         novo_registro = {
             "Cliente": cliente,
             "Data Evento": data_evento.strftime("%d/%m/%Y"),
             "Horário": horario,
-            "Local": local,
+            "Complexo Champions": local_str,
             "Transmissão TVs": transmissao,
             "Aprovado": val_aprovado,
             "Val. Extra": contratacao_extra,
@@ -137,20 +150,54 @@ with st.expander("➕ Cadastrar Novo Faturamento / Evento", expanded=True):
             "Observações": obs_gerais
         }
         st.session_state.faturamentos.append(novo_registro)
-        st.success("✅ Faturamento e detalhes do evento registados com sucesso!")
+        st.success("✅ Faturamento e detalhes do evento registrados com sucesso!")
 
-# --- DASHBOARD E TABELA COMPLETA ---
+# --- DASHBOARD, GRÁFICOS E TABELA COMPLETA ---
 if st.session_state.faturamentos:
     df = pd.DataFrame(st.session_state.faturamentos)
     
     st.markdown("---")
-    st.subheader("📊 Resumo Financeiro Consolidado")
+    st.subheader("📊 Resumo Financeiro & Indicadores")
     
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     kpi1.metric("Faturamento Bruto Total", f"R$ {df['Faturamento Bruto'].sum():,.2f}")
     kpi2.metric("Impostos (10% NF)", f"R$ {df['10% NF'].sum():,.2f}")
-    kpi3.metric("Custos Operacionais", f"R$ {df['Custos Operacionais'].sum():,.2f}")
+    kpi3.metric("Custos Operacionais + Logística", f"R$ {df['Custos Operacionais'].sum():,.2f}")
     kpi4.metric("Lucro Real Total", f"R$ {df['Lucro Real'].sum():,.2f}")
+
+    # --- GRÁFICOS ILUSTRATIVOS ---
+    st.markdown("### 📈 Análise Visual de Resultados")
+    g_col1, g_col2 = st.columns(2)
+
+    with g_col1:
+        # Gráfico de Rosca: Composição do Faturamento Bruto (Imposto, Custos, Lucro)
+        tot_imp = df['10% NF'].sum()
+        tot_custo = df['Custos Operacionais'].sum()
+        tot_lucro = df['Lucro Real'].sum()
+        
+        df_pizza = pd.DataFrame({
+            "Categoria": ["Impostos (10%)", "Custos Operacionais + Logística", "Lucro Real"],
+            "Valor": [tot_imp, tot_custo, tot_lucro]
+        })
+        
+        fig_pizza = px.pie(
+            df_pizza, values='Valor', names='Categoria',
+            title='Distribuição da Receita Bruta (R$)',
+            hole=0.4,
+            color_discrete_sequence=['#C8A051', '#8C6D58', '#3B2319']
+        )
+        st.plotly_chart(fig_pizza, use_container_width=True)
+
+    with g_col2:
+        # Gráfico de Barras: Lucro Real por Espaço do Complexo Champions
+        fig_barras = px.bar(
+            df, x='Complexo Champions', y='Lucro Real', color='Cliente',
+            title='Lucro Real por Espaço / Combinação de Espaços',
+            text_auto='.2f',
+            color_discrete_sequence=px.colors.qualitative.Dark24
+        )
+        fig_barras.update_layout(xaxis_title="Espaço(s) Utilizado(s)", yaxis_title="Lucro Real (R$)")
+        st.plotly_chart(fig_barras, use_container_width=True)
 
     st.markdown("---")
     st.subheader("📋 Painel Geral de Eventos & Faturamentos")
