@@ -29,7 +29,7 @@ def init_db():
             transmissao TEXT,
             aprovado REAL DEFAULT 0,
             val_extra REAL DEFAULT 0,
-            itens_extras TEXT,
+            itens_extras TEXT DEFAULT '[]',
             faturamento_bruto REAL DEFAULT 0,
             imposto_nf REAL DEFAULT 0,
             custos_total REAL DEFAULT 0,
@@ -67,7 +67,8 @@ def init_db():
         "lucro_antonio": "REAL DEFAULT 0",
         "custo_fornecedor_externo": "REAL DEFAULT 0",
         "desc_fornecedor_externo": "TEXT DEFAULT ''",
-        "fornecedores_externos": "TEXT DEFAULT '[]'"
+        "fornecedores_externos": "TEXT DEFAULT '[]'",
+        "itens_extras": "TEXT DEFAULT '[]'"
     }
     
     c.execute("PRAGMA table_info(eventos)")
@@ -112,7 +113,6 @@ def carregar_eventos():
         custos_tot = to_float(d.get("custos_total"))
         lucro = to_float(d.get("lucro_real")) if d.get("lucro_real") is not None else (fat_bruto - imp_nf - custos_tot)
 
-        # Trata lista de fornecedores externos
         forn_ext_list = parse_json_safely(d.get("fornecedores_externos"))
         if not forn_ext_list and (d.get("custo_fornecedor_externo") or d.get("desc_fornecedor_externo")):
             c_val = to_float(d.get("custo_fornecedor_externo"))
@@ -214,7 +214,7 @@ def deletar_evento_db(id_evento):
     conn.commit()
     conn.close()
 
-# GERADOR DE PDF DUAL COM ITENS EXTRAS E MULTIPLOS FORNECEDORES DETALHADOS
+# GERADOR DE PDF DUAL
 def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
@@ -229,7 +229,6 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     val_title_style = ParagraphStyle('ValTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.white)
     val_num_style = ParagraphStyle('ValNum', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#FFD700"), alignment=2)
 
-    # Logótipo
     if os.path.exists("logo.jpg"):
         story.append(RLImage("logo.jpg", width=560, height=130))
         story.append(Spacer(1, 10))
@@ -237,7 +236,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(RLImage("logo.png", width=560, height=130))
         story.append(Spacer(1, 10))
 
-    # 1. Identificação do Evento
+    # 1. Identificação
     titulo_sec1 = "📌 ORÇAMENTO COMERCIAL E ESCOPO TÉCNICO" if tipo_documento == "ORCAMENTO" else "📌 RELATÓRIO DE CONTROLE FINANCEIRO INTERNO"
     sec1_hdr = Table([[Paragraph(titulo_sec1, sec_title_style)]], colWidths=[560])
     sec1_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
@@ -262,7 +261,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     story.append(t2)
     story.append(Spacer(1, 10))
 
-    # 3. ITENS EXTRAS ADICIONADOS
+    # 3. ITENS EXTRAS
     itens_extras = registro.get("Itens Extras", [])
     if itens_extras and len(itens_extras) > 0:
         sec_ext_hdr = Table([[Paragraph("➕ ITENS E SERVIÇOS ADICIONAIS (EXTRAS)", sec_title_style)]], colWidths=[560])
@@ -273,23 +272,19 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         for item in itens_extras:
             desc = item.get("Descrição") or item.get("Descricao") or "Item Extra"
             val = float(item.get("Valor", 0.0))
-            dados_extras.append([
-                Paragraph(str(desc), td_style),
-                Paragraph(f"R$ {val:,.2f}", td_bold)
-            ])
+            dados_extras.append([Paragraph(str(desc), td_style), Paragraph(f"R$ {val:,.2f}", td_bold)])
 
         t_extras = Table(dados_extras, colWidths=[420, 140])
         t_extras.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EAE3D2")),
             ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#FAF6EE")),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")),
-            ('PADDING', (0,0), (-1,-1), 5),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+            ('PADDING', (0,0), (-1,-1), 5), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
         ]))
         story.append(t_extras)
         story.append(Spacer(1, 10))
 
-    # 4. Balanço Financeiro Interno e Fornecedores Externos (Apenas no PDF de Controle Financeiro)
+    # 4. Balanço Financeiro Interno
     if tipo_documento == "FINANCEIRO":
         fornecedores_list = registro.get("Fornecedores Externos", [])
         if fornecedores_list:
@@ -301,18 +296,14 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
             for f_item in fornecedores_list:
                 f_desc = f_item.get("Descrição") or "Fornecedor Externo"
                 f_val = float(f_item.get("Valor", 0.0))
-                dados_forn.append([
-                    Paragraph(str(f_desc), td_style),
-                    Paragraph(f"R$ {f_val:,.2f}", td_bold)
-                ])
+                dados_forn.append([Paragraph(str(f_desc), td_style), Paragraph(f"R$ {f_val:,.2f}", td_bold)])
 
             t_forn = Table(dados_forn, colWidths=[420, 140])
             t_forn.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EAE3D2")),
                 ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#FAF6EE")),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")),
-                ('PADDING', (0,0), (-1,-1), 5),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+                ('PADDING', (0,0), (-1,-1), 5), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
             ]))
             story.append(t_forn)
             story.append(Spacer(1, 10))
@@ -332,7 +323,6 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(t4)
         story.append(Spacer(1, 12))
 
-    # Rodapé com Valor Global
     val_box = Table([[Paragraph(f"VALOR FINANCEIRO GLOBAL ({registro['Cliente']}):", val_title_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", val_num_style)]], colWidths=[360, 200])
     val_box.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 10), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
     story.append(val_box)
@@ -344,7 +334,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
 # Inicializa Banco de Dados
 init_db()
 
-# --- CONFIGURAÇÃO DA PÁGINA STREAMLIT ---
+# --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
     page_title="Miguel Araújo Produções - Gestão Financeira Unificada",
     page_icon="💰",
@@ -384,7 +374,7 @@ st.markdown("---")
 
 faturamentos = carregar_eventos()
 
-# PAINEL GERAL DE INDICADORES (KPIs PROTEGIDOS)
+# PAINEL GERAL DE INDICADORES (KPIs)
 if faturamentos:
     df_kpi = pd.DataFrame(faturamentos)
     
@@ -416,7 +406,7 @@ if faturamentos:
 
     st.markdown("---")
 
-aba1, aba2, aba3 = st.tabs(["➕ Novo Evento / Lançamento", "✏️ Baixas & Edição Financeira", "📊 Relatórios & PDFs"])
+aba1, aba2, aba3 = st.tabs(["➕ Novo Evento / Lançamento", "✏️ Baixas & Edição Completa", "📊 Relatórios & PDFs"])
 
 # ABA 1: NOVO EVENTO
 with aba1:
@@ -466,8 +456,6 @@ with aba1:
         with col_c5: custo_logistica = st.number_input("Logística / Frete (R$)", min_value=0.0, step=20.0)
 
         st.markdown("#### 🌐 Fornecedores Externos (Ex: DJ, Internet Dedicada, Gerador, etc.)")
-        st.info("💡 **Dica:** Clique no botão **'+'** no canto da tabela abaixo para adicionar mais de um fornecedor externo.")
-        
         df_forn_init = pd.DataFrame([{"Descrição": "Internet Link Dedicado 100MB", "Valor": 0.0}])
         df_forn_edit = st.data_editor(
             df_forn_init, num_rows="dynamic", use_container_width=True,
@@ -525,51 +513,83 @@ with aba1:
             st.success("✅ Evento cadastrado com sucesso!")
             st.rerun()
 
-# ABA 2: EDITAR E DAR BAIXA
+# ABA 2: EDITAR COMPLETO E DAR BAIXA
 with aba2:
-    st.subheader("✏️ Dar Baixa em Recebimentos e Pagamentos")
+    st.subheader("✏️ Edição Completa e Baixas do Evento")
     if not faturamentos:
         st.info("Nenhum evento registrado no banco de dados.")
     else:
         idx_edit = st.selectbox(
-            "Selecione o Evento:", range(len(faturamentos)),
+            "Selecione o Evento para Editar:", range(len(faturamentos)),
             format_func=lambda x: f"ID #{faturamentos[x]['id']} - {faturamentos[x]['Cliente']} ({faturamentos[x]['Data Evento']})"
         )
         
         reg = faturamentos[idx_edit]
         
-        with st.form("form_baixa_financeira"):
-            st.markdown(f"### 📍 Evento: **{reg['Cliente']}** ({reg['Data Evento']})")
+        with st.form(f"form_edicao_completa_{reg['id']}"):
+            st.markdown(f"### 📍 Editando Evento ID #{reg['id']}")
             
-            c_rec1, c_rec2, c_rec3 = st.columns(3)
-            with c_rec1:
-                e_fat_bruto = st.number_input("Faturamento Bruto (R$)", value=float(reg["Faturamento Bruto"]))
-            with c_rec2:
-                e_val_rec = st.number_input("Valor JÁ RECEBIDO do Cliente (R$)", value=float(reg["Valor Recebido Cliente"]))
-            with c_rec3:
-                falta_rec = e_fat_bruto - e_val_rec
-                st.warning(f"**Falta Receber:** R$ {falta_rec:,.2f}")
+            # 1. Identificação Editável
+            st.markdown("#### 📋 1. Identificação do Evento")
+            ce_col1, ce_col2, ce_col3 = st.columns(3)
+            with ce_col1:
+                e_cliente = st.text_input("Cliente / Empresa", value=reg["Cliente"])
+                
+                # Conversão da data para objeto date
+                try:
+                    dt_parsed = datetime.strptime(reg["Data Evento"], "%d/%m/%Y").date()
+                except Exception:
+                    dt_parsed = datetime.now().date()
+                e_data_evento = st.date_input("Data do Evento", value=dt_parsed)
+                e_horario = st.text_input("Horário", value=reg["Horário"])
 
-            st.markdown("---")
-            c_pag1, c_pag2, c_pag3 = st.columns(3)
-            with c_pag1:
-                e_custo_total = st.number_input("Custo Total Operacional (R$)", value=float(reg["Custos Operacionais + Logística"]))
-            with c_pag2:
-                e_val_pago = st.number_input("Valor JÁ PAGO à Equipe/Fornecedores (R$)", value=float(reg["Valor Pago Equipe"]))
-            with c_pag3:
-                falta_pag = e_custo_total - e_val_pago
-                st.error(f"**Ainda Deve:** R$ {falta_pag:,.2f}")
+            with ce_col2:
+                locais_atuais = [loc.strip() for loc in reg["Complexo Champions"].split(",") if loc.strip()]
+                opcoes_locais = ["Arena", "Sala Glass", "Rooftop Maior", "Rooftop Menor"]
+                # Mantém locais customizados caso existam
+                for loc in locais_atuais:
+                    if loc and loc not in opcoes_locais:
+                        opcoes_locais.append(loc)
+                e_locais_sel = st.multiselect("Complexo Champions League", opcoes_locais, default=locais_atuais)
+                e_local_str = ", ".join(e_locais_sel) if e_locais_sel else "Não informado"
+                
+                idx_trans = 0 if reg["Transmissão TVs"] == "Sim" else 1
+                e_transmissao = st.radio("Transmissão para TVs?", ["Sim", "Não"], index=idx_trans, horizontal=True)
 
-            st.markdown("---")
-            st.markdown("### 🛠️ Cachês Equipe Técnica")
-            col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns(5)
-            with col_p1: e_resolume = st.number_input("Resolume (R$)", value=float(reg["Custo Resolume"]))
-            with col_p2: e_iluminacao = st.number_input("Iluminação (R$)", value=float(reg["Custo Iluminação"]))
-            with col_p3: e_sonorizacao = st.number_input("Som (R$)", value=float(reg["Custo Sonorização"]))
-            with col_p4: e_diretor = st.number_input("Diretor (R$)", value=float(reg["Custo Diretor"]))
-            with col_p5: e_logistica = st.number_input("Logística (R$)", value=float(reg["Custo Logística"]))
+            with ce_col3:
+                e_equipe_tecnica = st.text_area("Descrição da Equipe Escalada", value=reg["Equipe Técnica"])
 
-            st.markdown("### 🌐 Fornecedores Externos")
+            st.markdown("#### 🛠️ 2. Equipamentos Contratados")
+            e_equipamentos = st.text_area("Equipamentos em Contrato", value=reg["Equipamentos"])
+
+            st.markdown("#### ➕ 3. Itens e Serviços Extras")
+            extras_existentes = reg.get("Itens Extras", [])
+            df_extras_edit_existing = pd.DataFrame(extras_existentes if extras_existentes else [{"Descrição": "", "Valor": 0.0}])
+            df_extras_updated = st.data_editor(
+                df_extras_edit_existing, num_rows="dynamic", use_container_width=True,
+                column_config={
+                    "Descrição": st.column_config.TextColumn("Descrição do Item Extra", required=True),
+                    "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", min_value=0.0, step=50.0)
+                }, key=f"editor_extras_edit_{reg['id']}"
+            )
+            e_val_extra_total = float(df_extras_updated["Valor"].sum()) if not df_extras_updated.empty else 0.0
+
+            st.markdown("#### 💰 4. Faturamento do Evento")
+            col_ev1, col_ev2 = st.columns(2)
+            with col_ev1:
+                e_val_aprovado = st.number_input("Valor Base Aprovado (R$)", value=float(reg["Aprovado"]), min_value=0.0, step=100.0)
+            with col_ev2:
+                st.info(f"Faturamento Bruto Calculado: **R$ {(e_val_aprovado + e_val_extra_total):,.2f}**")
+
+            st.markdown("#### 👥 5. Custos: Equipe Técnica, Logística & Cachês")
+            col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
+            with col_ep1: e_resolume = st.number_input("Resolume (R$)", value=float(reg["Custo Resolume"]))
+            with col_ep2: e_iluminacao = st.number_input("Iluminação (R$)", value=float(reg["Custo Iluminação"]))
+            with col_ep3: e_sonorizacao = st.number_input("Som (R$)", value=float(reg["Custo Sonorização"]))
+            with col_ep4: e_diretor = st.number_input("Diretor (R$)", value=float(reg["Custo Diretor"]))
+            with col_ep5: e_logistica = st.number_input("Logística (R$)", value=float(reg["Custo Logística"]))
+
+            st.markdown("#### 🌐 Fornecedores Externos")
             forn_existentes = reg.get("Fornecedores Externos", [])
             if not forn_existentes:
                 forn_existentes = [{"Descrição": reg.get("Desc. Fornecedor Externo", ""), "Valor": float(reg.get("Custo Fornecedor Externo", 0.0))}]
@@ -583,43 +603,72 @@ with aba2:
                 }, key=f"editor_forn_edit_{reg['id']}"
             )
 
-            e_obs = st.text_area("Observações", value=reg["Observações"])
+            st.markdown("#### 💳 6. Baixas de Caixa (Pagamentos e Recebimentos)")
+            c_rec1, c_rec2 = st.columns(2)
+            with c_rec1:
+                e_val_rec = st.number_input("Valor JÁ RECEBIDO do Cliente (R$)", value=float(reg["Valor Recebido Cliente"]))
+            with c_rec2:
+                e_val_pago = st.number_input("Valor JÁ PAGO à Equipe/Fornecedores (R$)", value=float(reg["Valor Pago Equipe"]))
 
+            e_obs = st.text_area("Observações Gerais", value=reg["Observações"])
+
+            st.markdown("---")
             col_btn1, col_btn2 = st.columns([3, 1])
             with col_btn1:
-                btn_salvar_baixa = st.form_submit_button("🔄 Salvar Alterações")
+                btn_salvar_baixa = st.form_submit_button("🔄 Salvar Alterações do Evento", use_container_width=True)
             with col_btn2:
-                btn_excluir_eve = st.form_submit_button("❌ Excluir Evento")
+                btn_excluir_eve = st.form_submit_button("❌ Excluir Evento", use_container_width=True)
 
             if btn_salvar_baixa:
                 forn_atualizados_list = df_forn_updated.to_dict('records') if not df_forn_updated.empty else []
                 e_externo_total = float(df_forn_updated["Valor"].sum()) if not df_forn_updated.empty else 0.0
                 e_desc_externo_concat = ", ".join([str(f.get("Descrição", "")) for f in forn_atualizados_list if f.get("Descrição")])
 
-                novos_custos = e_resolume + e_iluminacao + e_sonorizacao + e_diretor + e_logistica + e_externo_total
-                novo_imposto = e_fat_bruto * 0.10
-                novo_lucro = e_fat_bruto - novo_imposto - novos_custos
+                extras_atualizados_list = df_extras_updated.to_dict('records') if not df_extras_updated.empty else []
 
-                st_rec = "Pago Total" if e_val_rec >= e_fat_bruto and e_fat_bruto > 0 else ("Parcial" if e_val_rec > 0 else "Pendente")
+                novo_fat_bruto = e_val_aprovado + e_val_extra_total
+                novos_custos = e_resolume + e_iluminacao + e_sonorizacao + e_diretor + e_logistica + e_externo_total
+                novo_imposto = novo_fat_bruto * 0.10
+                novo_lucro = novo_fat_bruto - novo_imposto - novos_custos
+
+                st_rec = "Pago Total" if e_val_rec >= novo_fat_bruto and novo_fat_bruto > 0 else ("Parcial" if e_val_rec > 0 else "Pendente")
                 st_pag = "Pago Total" if e_val_pago >= novos_custos and novos_custos > 0 else ("Parcial" if e_val_pago > 0 else "Pendente")
 
                 reg_atualizado = {
-                    "Cliente": reg["Cliente"], "Data Evento": reg["Data Evento"], "Horário": reg["Horário"],
-                    "Complexo Champions": reg["Complexo Champions"], "Transmissão TVs": reg["Transmissão TVs"],
-                    "Aprovado": reg["Aprovado"], "Val. Extra": reg["Val. Extra"], "Itens Extras": reg["Itens Extras"],
-                    "Faturamento Bruto": e_fat_bruto, "10% NF": novo_imposto, "Custos Operacionais + Logística": novos_custos,
-                    "Custo Resolume": e_resolume, "Custo Iluminação": e_iluminacao, "Custo Sonorização": e_sonorizacao,
-                    "Custo Diretor": e_diretor, "Custo Logística": e_logistica,
-                    "Custo Fornecedor Externo": e_externo_total, "Desc. Fornecedor Externo": e_desc_externo_concat,
+                    "Cliente": e_cliente,
+                    "Data Evento": e_data_evento.strftime("%d/%m/%Y"),
+                    "Horário": e_horario,
+                    "Complexo Champions": e_local_str,
+                    "Transmissão TVs": e_transmissao,
+                    "Aprovado": e_val_aprovado,
+                    "Val. Extra": e_val_extra_total,
+                    "Itens Extras": extras_atualizados_list,
+                    "Faturamento Bruto": novo_fat_bruto,
+                    "10% NF": novo_imposto,
+                    "Custos Operacionais + Logística": novos_custos,
+                    "Custo Resolume": e_resolume,
+                    "Custo Iluminação": e_iluminacao,
+                    "Custo Sonorização": e_sonorizacao,
+                    "Custo Diretor": e_diretor,
+                    "Custo Logística": e_logistica,
+                    "Custo Fornecedor Externo": e_externo_total,
+                    "Desc. Fornecedor Externo": e_desc_externo_concat,
                     "Fornecedores Externos": forn_atualizados_list,
-                    "Valor Recebido Cliente": e_val_rec, "Valor Pago Equipe": e_val_pago,
-                    "Status Recebimento": st_rec, "Status Pagamento": st_pag,
-                    "Lucro Real": novo_lucro, "Lucro Miguel Araújo": novo_lucro * 0.50, "Lucro Antonio Carlos": novo_lucro * 0.50,
-                    "Pag. Operacional": reg["Pag. Operacional"], "Rec. Champions": reg["Rec. Champions"],
-                    "Equipamentos": reg["Equipamentos"], "Equipe Técnica": reg["Equipe Técnica"], "Observações": e_obs
+                    "Valor Recebido Cliente": e_val_rec,
+                    "Valor Pago Equipe": e_val_pago,
+                    "Status Recebimento": st_rec,
+                    "Status Pagamento": st_pag,
+                    "Lucro Real": novo_lucro,
+                    "Lucro Miguel Araújo": novo_lucro * 0.50,
+                    "Lucro Antonio Carlos": novo_lucro * 0.50,
+                    "Pag. Operacional": reg["Pag. Operacional"],
+                    "Rec. Champions": reg["Rec. Champions"],
+                    "Equipamentos": e_equipamentos if e_equipamentos else "Não especificado",
+                    "Equipe Técnica": e_equipe_tecnica if e_equipe_tecnica else "Não especificado",
+                    "Observações": e_obs if e_obs else "Nenhuma observação."
                 }
                 atualizar_evento_db(reg['id'], reg_atualizado)
-                st.success("✅ Atualizado com sucesso!")
+                st.success("✅ Evento atualizado com sucesso!")
                 st.rerun()
 
             if btn_excluir_eve:
