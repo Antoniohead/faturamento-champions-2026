@@ -3,6 +3,13 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import os
+import io
+
+# ReportLab para geração de PDFs
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 # Configuração da página
 st.set_page_config(
@@ -11,26 +18,35 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização CSS Personalizada (Inspirada na marca Miguel Araújo Produções: Marrom, Dourado e Verde Cênico)
+# Estilização CSS Personalizada
 st.markdown("""
     <style>
-    /* Fundo Marrom Escuro Elegante */
     .stApp {
         background-color: #1A1412;
         color: #FAF6EE;
     }
-    
-    /* Cabeçalho e Caixas de Texto / Expander */
     .stExpander {
         background-color: #2A201C !important;
         border: 1px solid #C5A059 !important;
         border-radius: 8px;
     }
-    
-    /* Botão Salvar em Dourado com Efeito */
+    input, textarea, select, div[role="combobox"] {
+        color: #FAF6EE !important;
+        background-color: #2A201C !important;
+        -webkit-text-fill-color: #FAF6EE !important;
+    }
+    div[data-baseweb="input"], div[data-baseweb="textarea"], div[data-baseweb="select"] {
+        background-color: #2A201C !important;
+        border: 1px solid #C5A059 !important;
+        border-radius: 6px !important;
+    }
+    ::placeholder {
+        color: #A09080 !important;
+        opacity: 0.8 !important;
+    }
     .stButton>button {
         background: linear-gradient(135deg, #C5A059 0%, #9A7B3E 100%);
-        color: #1A1412;
+        color: #1A1412 !important;
         font-weight: bold;
         border-radius: 8px;
         border: none;
@@ -39,32 +55,84 @@ st.markdown("""
     }
     .stButton>button:hover {
         background: linear-gradient(135deg, #00E676 0%, #00C853 100%);
-        color: #1A1412;
+        color: #1A1412 !important;
         box-shadow: 0 0 12px rgba(0, 230, 118, 0.4);
     }
-    
-    /* Estilização das Métricas / Cards */
     div[data-testid="stMetricValue"] {
         color: #C5A059 !important;
         font-weight: bold;
     }
-    
-    /* Ajustes de rótulos de texto */
     label, p, span {
         color: #FAF6EE !important;
     }
-    
     h1, h2, h3 {
         color: #C5A059 !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
+# --- FUNÇÃO DE GERAÇÃO DE PDF ---
+def gerar_pdf_relatorio(df_dados):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    story = []
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=18,
+        textColor=colors.HexColor("#C5A059"),
+        spaceAfter=10
+    )
+    subtitle_style = ParagraphStyle(
+        'SubTitleStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        textColor=colors.HexColor("#1A1412"),
+        spaceAfter=20
+    )
+    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontSize=9)
+    header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=9, fontName='Helvetica-Bold', textColor=colors.white)
+
+    # Cabeçalho do PDF
+    story.append(Paragraph("MIGUEL ARAÚJO PRODUÇÕES", title_style))
+    story.append(Paragraph("Relatório Consolidado de Faturamento Operacional & Audiovisual", subtitle_style))
+    story.append(Spacer(1, 10))
+
+    # Tabela com Dados
+    colunas = ["Cliente", "Data", "Setor", "Fat. Bruto", "Lucro Real"]
+    tabela_data = [[Paragraph(c, header_style) for c in colunas]]
+
+    for idx, row in df_dados.iterrows():
+        tabela_data.append([
+            Paragraph(str(row["Cliente"]), normal_style),
+            Paragraph(str(row["Data Evento"]), normal_style),
+            Paragraph(str(row["Complexo Champions"]), normal_style),
+            Paragraph(f"R$ {row['Faturamento Bruto']:,.2f}", normal_style),
+            Paragraph(f"R$ {row['Lucro Real']:,.2f}", normal_style)
+        ])
+
+    pdf_table = Table(tabela_data, colWidths=[160, 70, 120, 100, 100])
+    pdf_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2A201C")),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor("#C5A059")),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('BOTTOMPADDING', (0,0), (-1,0), 8),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")),
+    ]))
+
+    story.append(pdf_table)
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
 # --- CABEÇALHO DA APLICAÇÃO ---
 col_logo, col_tit = st.columns([1.5, 3.5])
 
 with col_logo:
-    # Exibe a imagem salva no repositório (logo.jpg ou logo.png)
     if os.path.exists("logo.jpg"):
         st.image("logo.jpg", use_container_width=True)
     elif os.path.exists("logo.png"):
@@ -83,7 +151,6 @@ with col_tit:
 
 st.markdown("---")
 
-# Inicialização da base de dados na sessão
 if "faturamentos" not in st.session_state:
     st.session_state.faturamentos = []
 
@@ -160,7 +227,6 @@ with st.expander("➕ Cadastrar Novo Faturamento / Orçamento Operacional", expa
 
     obs_gerais = st.text_area("Observações Gerais / Escopo", placeholder="Ex: Fornecimento de estrutura audiovisual completa e suporte de logística...")
 
-    # CÁLCULOS AUTOMÁTICOS
     faturamento_bruto = val_aprovado + contratacao_extra
     imposto_nf = faturamento_bruto * 0.10
     total_custos_op = custo_resolume + custo_iluminacao + custo_sonorizacao + custo_diretor + custo_logistica
@@ -190,7 +256,7 @@ with st.expander("➕ Cadastrar Novo Faturamento / Orçamento Operacional", expa
         st.session_state.faturamentos.append(novo_registro)
         st.success("✅ Faturamento e detalhes do evento registrados com sucesso!")
 
-# --- DASHBOARD, GRÁFICOS E TABELA COMPLETA ---
+# --- DASHBOARD & EXPORTAÇÃO EM PDF ---
 if st.session_state.faturamentos:
     df = pd.DataFrame(st.session_state.faturamentos)
     
@@ -203,7 +269,6 @@ if st.session_state.faturamentos:
     kpi3.metric("Custos Operacionais + Logística", f"R$ {df['Custos Operacionais + Logística'].sum():,.2f}")
     kpi4.metric("Lucro Real Total", f"R$ {df['Lucro Real'].sum():,.2f}")
 
-    # --- GRÁFICOS ---
     st.markdown("### 📈 Análise Visual de Resultados")
     g_col1, g_col2 = st.columns(2)
 
@@ -237,5 +302,18 @@ if st.session_state.faturamentos:
         st.plotly_chart(fig_barras, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("📋 Painel Geral de Eventos & Faturamentos")
+    col_tb1, col_tb2 = st.columns([3, 1])
+    
+    with col_tb1:
+        st.subheader("📋 Painel Geral de Eventos & Faturamentos")
+    with col_tb2:
+        pdf_file = gerar_pdf_relatorio(df)
+        st.download_button(
+            label="📄 Baixar Relatório em PDF",
+            data=pdf_file,
+            file_name=f"Relatorio_Faturamento_MAP_{datetime.now().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
     st.dataframe(df, use_container_width=True)
