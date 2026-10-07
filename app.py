@@ -5,15 +5,15 @@ from datetime import datetime
 import os
 import io
 
-# ReportLab para geração de PDFs com Design Avançado
+# ReportLab para geração de PDFs
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 # Configuração da página
 st.set_page_config(
-    page_title="Miguel Araújo Produções - Gestão de Faturamento",
+    page_title="Miguel Araújo Produções - Gestão & Orçamentos",
     page_icon="🎬",
     layout="wide"
 )
@@ -71,15 +71,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNÇÃO DE GERAÇÃO DE PDF DETALHADO (ESTILO IMAGEM ENVIADA) ---
-def gerar_pdf_detalhado_evento(registro):
+# --- FUNÇÃO GERADORA DE PDF (DUAL: ORÇAMENTO CLIENTE OU CONTROLE INTERNO) ---
+def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
     story = []
     
     styles = getSampleStyleSheet()
     
-    # Estilos customizados inspirados na imagem
     sec_title_style = ParagraphStyle(
         'SecTitle',
         parent=styles['Heading2'],
@@ -97,7 +96,7 @@ def gerar_pdf_detalhado_evento(registro):
     val_title_style = ParagraphStyle('ValTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.white)
     val_num_style = ParagraphStyle('ValNum', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#FFD700"), alignment=2)
 
-    # 1. Cabeçalho com Imagem / Logo
+    # 1. Cabeçalho com Logo
     if os.path.exists("logo.jpg"):
         story.append(RLImage("logo.jpg", width=560, height=130))
         story.append(Spacer(1, 10))
@@ -106,19 +105,18 @@ def gerar_pdf_detalhado_evento(registro):
         story.append(Spacer(1, 10))
 
     # --- SEÇÃO 1: RESUMO DO EVENTO ---
-    sec1_hdr = Table([[Paragraph("📌 SETOR 1: INFORMAÇÕES GERAIS E CONTRATO", sec_title_style)]], colWidths=[560])
+    titulo_sec1 = "📌 ORÇAMENTO COMERCIAL E ESCOPO TÉCNICO" if tipo_documento == "ORCAMENTO" else "📌 RELATÓRIO DE CONTROLE FINANCEIRO INTERNO"
+    sec1_hdr = Table([[Paragraph(titulo_sec1, sec_title_style)]], colWidths=[560])
     sec1_hdr.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")),
         ('PADDING', (0,0), (-1,-1), 6),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
     ]))
     story.append(sec1_hdr)
     
     dados_sec1 = [
         [Paragraph("CLIENTE / EMPRESA", th_style), Paragraph(str(registro["Cliente"]), td_bold), Paragraph("DATA DO EVENTO", th_style), Paragraph(str(registro["Data Evento"]), td_style)],
         [Paragraph("COMPLEXO / SETOR", th_style), Paragraph(str(registro["Complexo Champions"]), td_style), Paragraph("HORÁRIO", th_style), Paragraph(str(registro["Horário"]), td_style)],
-        [Paragraph("TRANSMISSÃO TVs", th_style), Paragraph(str(registro["Transmissão TVs"]), td_style), Paragraph("PAG. OPERACIONAL", th_style), Paragraph(str(registro["Pag. Operacional"]), td_style)],
-        [Paragraph("REC. CHAMPIONS", th_style), Paragraph(str(registro["Rec. Champions"]), td_style), Paragraph("OBSERVAÇÕES", th_style), Paragraph(str(registro["Observações"]), td_style)]
+        [Paragraph("TRANSMISSÃO TVs", th_style), Paragraph(str(registro["Transmissão TVs"]), td_style), Paragraph("OBSERVAÇÕES", th_style), Paragraph(str(registro["Observações"]), td_style)]
     ]
     t1 = Table(dados_sec1, colWidths=[110, 170, 110, 170])
     t1.setStyle(TableStyle([
@@ -129,7 +127,7 @@ def gerar_pdf_detalhado_evento(registro):
     story.append(t1)
     story.append(Spacer(1, 10))
 
-    # --- SEÇÃO 2: EQUIPAMENTOS E ESTRUTURA TÉCNICA ---
+    # --- SEÇÃO 2: EQUIPAMENTOS E INFRAESTRUTURA TÉCNICA ---
     sec2_hdr = Table([[Paragraph("🛠️ SETOR 2: ENGENHARIA DE ÁUDIO, LUZ, VÍDEO & ESTRUTURA", sec_title_style)]], colWidths=[560])
     sec2_hdr.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")),
@@ -175,35 +173,61 @@ def gerar_pdf_detalhado_evento(registro):
     story.append(t3)
     story.append(Spacer(1, 10))
 
-    # --- SEÇÃO 4: RESUMO FINANCEIRO E DIVISÃO DE LUCRO ---
-    sec4_hdr = Table([[Paragraph("💰 BALANÇO FINANCEIRO & DIVISÃO DE LUCRO OPERACIONAL", sec_title_style)]], colWidths=[560])
-    sec4_hdr.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")),
-        ('PADDING', (0,0), (-1,-1), 6),
-    ]))
-    story.append(sec4_hdr)
+    # --- SEÇÃO 4: CONTRATAÇÃO EXTRA (SE HOUVER) ---
+    if registro["Val. Extra"] > 0 or (registro["Descrição Extra"] and registro["Descrição Extra"] != "Nenhuma"):
+        sec_extra_hdr = Table([[Paragraph("➕ SEÇÃO EXTRA: ITEM / ADICIONAL CONTRATADO FORA DO ESCOPO", sec_title_style)]], colWidths=[560])
+        sec_extra_hdr.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")),
+            ('PADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(sec_extra_hdr)
 
-    lucro_total = registro["Lucro Real"]
-    lucro_miguel = lucro_total * 0.50
-    lucro_antonio = lucro_total * 0.50
+        val_extra_str = f"R$ {registro['Val. Extra']:,.2f}" if tipo_documento == "FINANCEIRO" else "INCLUSO NO TOTAL"
+        dados_extra = [
+            [Paragraph("DESCRIÇÃO DA CONTRATAÇÃO EXTRA", th_style), Paragraph("VALOR ADICIONAL", th_style)],
+            [Paragraph(str(registro["Descrição Extra"]), td_style), Paragraph(val_extra_str, td_bold)]
+        ]
+        t_extra = Table(dados_extra, colWidths=[420, 140])
+        t_extra.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EAE3D2")),
+            ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#FAF6EE")),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")),
+            ('PADDING', (0,0), (-1,-1), 6),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ]))
+        story.append(t_extra)
+        story.append(Spacer(1, 10))
 
-    dados_sec4 = [
-        [Paragraph("Faturamento Bruto:", th_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", td_bold), Paragraph("Imposto Nota Fiscal (10%):", th_style), Paragraph(f"R$ {registro['10% NF']:,.2f}", td_style)],
-        [Paragraph("Custos Operacionais:", th_style), Paragraph(f"R$ {registro['Custos Operacionais + Logística']:,.2f}", td_style), Paragraph("Lucro Real Líquido:", th_style), Paragraph(f"R$ {lucro_total:,.2f}", td_bold)],
-        [Paragraph("<b>PARTE MIGUEL ARAÚJO (50%)</b>", th_style), Paragraph(f"<b>R$ {lucro_miguel:,.2f}</b>", td_bold), Paragraph("<b>PARTE ANTONIO CARLOS (50%)</b>", th_style), Paragraph(f"<b>R$ {lucro_antonio:,.2f}</b>", td_bold)]
-    ]
-    t4 = Table(dados_sec4, colWidths=[140, 140, 140, 140])
-    t4.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF6EE")),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")),
-        ('PADDING', (0,0), (-1,-1), 5),
-    ]))
-    story.append(t4)
-    story.append(Spacer(1, 12))
+    # --- SEÇÃO 5: FINANCEIRO COMPLETO OU RESUMO CLIENTE ---
+    if tipo_documento == "FINANCEIRO":
+        sec4_hdr = Table([[Paragraph("💰 BALANÇO FINANCEIRO & DIVISÃO DE LUCRO OPERACIONAL", sec_title_style)]], colWidths=[560])
+        sec4_hdr.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")),
+            ('PADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(sec4_hdr)
 
-    # --- BANNER FINAL DE VALOR GLOBAL ---
+        lucro_total = registro["Lucro Real"]
+        lucro_miguel = registro["Lucro Miguel Araújo"]
+        lucro_antonio = registro["Lucro Antonio Carlos"]
+
+        dados_sec4 = [
+            [Paragraph("Faturamento Bruto:", th_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", td_bold), Paragraph("Imposto Nota Fiscal (10%):", th_style), Paragraph(f"R$ {registro['10% NF']:,.2f}", td_style)],
+            [Paragraph("Custos Operacionais:", th_style), Paragraph(f"R$ {registro['Custos Operacionais + Logística']:,.2f}", td_style), Paragraph("Lucro Real Líquido:", th_style), Paragraph(f"R$ {lucro_total:,.2f}", td_bold)],
+            [Paragraph("<b>PARTE MIGUEL ARAÚJO (50%)</b>", th_style), Paragraph(f"<b>R$ {lucro_miguel:,.2f}</b>", td_bold), Paragraph("<b>PARTE ANTONIO CARLOS (50%)</b>", th_style), Paragraph(f"<b>R$ {lucro_antonio:,.2f}</b>", td_bold)]
+        ]
+        t4 = Table(dados_sec4, colWidths=[140, 140, 140, 140])
+        t4.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF6EE")),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")),
+            ('PADDING', (0,0), (-1,-1), 5),
+        ]))
+        story.append(t4)
+        story.append(Spacer(1, 12))
+
+    # Banner Final de Valor Global
     val_box = Table([[
-        Paragraph(f"VALOR FINANCIAL GLOBAL (PACOTE MGL - {registro['Cliente']}):", val_title_style),
+        Paragraph(f"VALOR FINANCEIRO GLOBAL (PACOTE MGL - {registro['Cliente']}):", val_title_style),
         Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", val_num_style)
     ]], colWidths=[360, 200])
     val_box.setStyle(TableStyle([
@@ -235,7 +259,7 @@ with col_logo:
 
 with col_tit:
     st.title("MIGUEL ARAÚJO PRODUÇÕES")
-    st.subheader("Especialista em Audiovisual — Painel de Gestão, Sociedade e Faturamento")
+    st.subheader("Especialista em Audiovisual — Gestão, Orçamentos e Sociedade")
 
 st.markdown("---")
 
@@ -275,7 +299,7 @@ with st.expander("➕ Cadastrar Novo Faturamento / Orçamento Operacional", expa
         placeholder="Ex: 04 Microfones Shure QLXD, 01 Rack Amplificador, 01 Mesa XR16, 01 Servidor Resolume, 02 Notebooks PPT..."
     )
 
-    st.markdown("### 💰 3. Valores e Contratação Extra")
+    st.markdown("### ➕ 3. Valores e Contratação Extra (Fora do Escopo Inicial)")
     col_v1, col_v2, col_v3 = st.columns(3)
     
     with col_v1:
@@ -283,14 +307,14 @@ with st.expander("➕ Cadastrar Novo Faturamento / Orçamento Operacional", expa
         val_aprovado = st.number_input("Valor Aprovado (R$)", min_value=0.0, step=100.0)
         
     with col_v2:
-        contratacao_extra = st.number_input("Valor Contratação Extra (R$)", min_value=0.0, step=50.0)
-        desc_extra = st.text_input("Descrição da Contratação Extra", placeholder="Ex: Diária estendida, iluminação cênica adicional...")
+        contratacao_extra = st.number_input("Valor da Contratação Extra (R$)", min_value=0.0, step=50.0)
+        desc_extra = st.text_area("Descrição do Item / Serviço Extra", placeholder="Ex: Diária estendida, painel de LED adicional, iluminação cênica...")
         
     with col_v3:
         fat_bruto_temp = val_aprovado + contratacao_extra
         imp_temp = fat_bruto_temp * 0.10
         st.info("💡 **Resumo Fiscal**\n"
-                f"• Faturamento Bruto: **R$ {fat_bruto_temp:,.2f}**\n"
+                f"• Orçamento + Extra: **R$ {fat_bruto_temp:,.2f}**\n"
                 f"• Nota Fiscal (10%): **R$ {imp_temp:,.2f}**")
 
     st.markdown("### 👥 4. Custos Operacionais & Logística")
@@ -333,7 +357,7 @@ with st.expander("➕ Cadastrar Novo Faturamento / Orçamento Operacional", expa
             "Transmissão TVs": transmissao,
             "Aprovado": val_aprovado,
             "Val. Extra": contratacao_extra,
-            "Descrição Extra": desc_extra,
+            "Descrição Extra": desc_extra if desc_extra else "Nenhuma",
             "Faturamento Bruto": faturamento_bruto,
             "10% NF": imposto_nf,
             "Custos Operacionais + Logística": total_custos_op,
@@ -347,9 +371,9 @@ with st.expander("➕ Cadastrar Novo Faturamento / Orçamento Operacional", expa
             "Observações": obs_gerais if obs_gerais else "Nenhuma observação registrada."
         }
         st.session_state.faturamentos.append(novo_registro)
-        st.success("✅ Faturamento e divisão de lucros salvos com sucesso!")
+        st.success("✅ Faturamento salvo com sucesso!")
 
-# --- DASHBOARD & GERADOR DE PDFS INDIVIDUAIS ---
+# --- DASHBOARD & GERADOR DE PDFS DUAIS ---
 if st.session_state.faturamentos:
     df = pd.DataFrame(st.session_state.faturamentos)
     
@@ -397,21 +421,38 @@ if st.session_state.faturamentos:
         st.plotly_chart(fig_barras, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("📋 Painel de Eventos & Emissão de Relatório Personalizado em PDF")
+    st.subheader("📄 Emissão de Documentos em PDF")
     
-    col_sel, col_btn = st.columns([3, 1])
+    col_sel, col_btn1, col_btn2 = st.columns([2, 1, 1])
     with col_sel:
-        evento_idx = st.selectbox("Selecione o Evento para Gerar o PDF Modelo MGL:", range(len(st.session_state.faturamentos)), format_func=lambda x: f"{st.session_state.faturamentos[x]['Cliente']} - {st.session_state.faturamentos[x]['Data Evento']} ({st.session_state.faturamentos[x]['Complexo Champions']})")
+        evento_idx = st.selectbox(
+            "Selecione o Evento:",
+            range(len(st.session_state.faturamentos)),
+            format_func=lambda x: f"{st.session_state.faturamentos[x]['Cliente']} - {st.session_state.faturamentos[x]['Data Evento']} ({st.session_state.faturamentos[x]['Complexo Champions']})"
+        )
     
-    with col_btn:
-        reg_selecionado = st.session_state.faturamentos[evento_idx]
-        pdf_bytes = gerar_pdf_detalhado_evento(reg_selecionado)
+    reg_selecionado = st.session_state.faturamentos[evento_idx]
+    
+    with col_btn1:
+        pdf_orcamento = gerar_pdf_evento(reg_selecionado, tipo_documento="ORCAMENTO")
         st.download_button(
-            label="📄 Baixar PDF Modelo MGL",
-            data=pdf_bytes,
-            file_name=f"Relatorio_{reg_selecionado['Cliente'].replace(' ', '_')}_{reg_selecionado['Data Evento'].replace('/', '-')}.pdf",
+            label="📄 Baixar ORÇAMENTO (Cliente)",
+            data=pdf_orcamento,
+            file_name=f"Orcamento_{reg_selecionado['Cliente'].replace(' ', '_')}_{reg_selecionado['Data Evento'].replace('/', '-')}.pdf",
             mime="application/pdf",
             use_container_width=True
         )
 
+    with col_btn2:
+        pdf_financeiro = gerar_pdf_evento(reg_selecionado, tipo_documento="FINANCEIRO")
+        st.download_button(
+            label="📊 Baixar CONTROLE (Interno)",
+            data=pdf_financeiro,
+            file_name=f"ControleFinanceiro_{reg_selecionado['Cliente'].replace(' ', '_')}_{reg_selecionado['Data Evento'].replace('/', '-')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+    st.markdown("---")
+    st.subheader("📋 Tabela Geral de Eventos Cadastrados")
     st.dataframe(df, use_container_width=True)
