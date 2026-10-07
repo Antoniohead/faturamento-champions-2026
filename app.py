@@ -432,4 +432,104 @@ with aba2:
             st.markdown(f"### 📍 Evento: **{reg['Cliente']}** ({reg['Data Evento']})")
             
             c_rec1, c_rec2, c_rec3 = st.columns(3)
-            with c_rec1
+            with c_rec1:
+                e_fat_bruto = st.number_input("Faturamento Bruto (R$)", value=float(reg["Faturamento Bruto"]))
+            with c_rec2:
+                e_val_rec = st.number_input("Valor JÁ RECEBIDO do Cliente (R$)", value=float(reg["Valor Recebido Cliente"]))
+            with c_rec3:
+                falta_rec = e_fat_bruto - e_val_rec
+                st.warning(f"**Falta Receber:** R$ {falta_rec:,.2f}")
+
+            st.markdown("---")
+            c_pag1, c_pag2, c_pag3 = st.columns(3)
+            with c_pag1:
+                e_custo_total = st.number_input("Custo Total Equipe (R$)", value=float(reg["Custos Operacionais + Logística"]))
+            with c_pag2:
+                e_val_pago = st.number_input("Valor JÁ PAGO à Equipe (R$)", value=float(reg["Valor Pago Equipe"]))
+            with c_pag3:
+                falta_pag = e_custo_total - e_val_pago
+                st.error(f"**Ainda Deve à Equipe:** R$ {falta_pag:,.2f}")
+
+            st.markdown("---")
+            st.markdown("### 🛠️ Cachês Individuais")
+            col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns(5)
+            with col_p1: e_resolume = st.number_input("Resolume (R$)", value=float(reg["Custo Resolume"]))
+            with col_p2: e_iluminacao = st.number_input("Iluminação (R$)", value=float(reg["Custo Iluminação"]))
+            with col_p3: e_sonorizacao = st.number_input("Som (R$)", value=float(reg["Custo Sonorização"]))
+            with col_p4: e_diretor = st.number_input("Diretor (R$)", value=float(reg["Custo Diretor"]))
+            with col_p5: e_logistica = st.number_input("Logística (R$)", value=float(reg["Custo Logística"]))
+
+            e_obs = st.text_area("Observações", value=reg["Observações"])
+
+            col_btn1, col_btn2 = st.columns([3, 1])
+            with col_btn1:
+                btn_salvar_baixa = st.form_submit_button("🔄 Salvar Alterações")
+            with col_btn2:
+                btn_excluir_eve = st.form_submit_button("❌ Excluir Evento")
+
+            if btn_salvar_baixa:
+                novos_custos = e_resolume + e_iluminacao + e_sonorizacao + e_diretor + e_logistica
+                novo_imposto = e_fat_bruto * 0.10
+                novo_lucro = e_fat_bruto - novo_imposto - novos_custos
+
+                st_rec = "Pago Total" if e_val_rec >= e_fat_bruto and e_fat_bruto > 0 else ("Parcial" if e_val_rec > 0 else "Pendente")
+                st_pag = "Pago Total" if e_val_pago >= novos_custos and novos_custos > 0 else ("Parcial" if e_val_pago > 0 else "Pendente")
+
+                reg_atualizado = {
+                    "Cliente": reg["Cliente"], "Data Evento": reg["Data Evento"], "Horário": reg["Horário"],
+                    "Complexo Champions": reg["Complexo Champions"], "Transmissão TVs": reg["Transmissão TVs"],
+                    "Aprovado": reg["Aprovado"], "Val. Extra": reg["Val. Extra"], "Itens Extras": reg["Itens Extras"],
+                    "Faturamento Bruto": e_fat_bruto, "10% NF": novo_imposto, "Custos Operacionais + Logística": novos_custos,
+                    "Custo Resolume": e_resolume, "Custo Iluminação": e_iluminacao, "Custo Sonorização": e_sonorizacao,
+                    "Custo Diretor": e_diretor, "Custo Logística": e_logistica,
+                    "Valor Recebido Cliente": e_val_rec, "Valor Pago Equipe": e_val_pago,
+                    "Status Recebimento": st_rec, "Status Pagamento": st_pag,
+                    "Lucro Real": novo_lucro, "Lucro Miguel Araújo": novo_lucro * 0.50, "Lucro Antonio Carlos": novo_lucro * 0.50,
+                    "Pag. Operacional": reg["Pag. Operacional"], "Rec. Champions": reg["Rec. Champions"],
+                    "Equipamentos": reg["Equipamentos"], "Equipe Técnica": reg["Equipe Técnica"], "Observações": e_obs
+                }
+                atualizar_evento_db(reg['id'], reg_atualizado)
+                st.success("✅ Atualizado com sucesso!")
+                st.rerun()
+
+            if btn_excluir_eve:
+                deletar_evento_db(reg['id'])
+                st.warning("🗑️ Evento excluído!")
+                st.rerun()
+
+# ABA 3: TABELA DETALHADA E GERADOR DE PDF
+with aba3:
+    st.subheader("📄 Emissão de Documentos e PDFs")
+    if faturamentos:
+        col_sel, col_btn1, col_btn2 = st.columns([2, 1, 1])
+        with col_sel:
+            evento_idx_pdf = st.selectbox(
+                "Selecione o Evento para gerar o PDF:", range(len(faturamentos)),
+                format_func=lambda x: f"{faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
+            )
+        
+        reg_sel = faturamentos[evento_idx_pdf]
+        
+        with col_btn1:
+            pdf_orcamento = gerar_pdf_evento(reg_sel, tipo_documento="ORCAMENTO")
+            st.download_button("📄 Baixar ORÇAMENTO (Cliente)", data=pdf_orcamento, file_name=f"Orcamento_{reg_sel['Cliente']}.pdf", mime="application/pdf", use_container_width=True)
+
+        with col_btn2:
+            pdf_financeiro = gerar_pdf_evento(reg_sel, tipo_documento="FINANCEIRO")
+            st.download_button("📊 Baixar CONTROLE (Interno)", data=pdf_financeiro, file_name=f"Controle_{reg_sel['Cliente']}.pdf", mime="application/pdf", use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("📋 Relatório Geral Financeiro")
+        
+        df_full = pd.DataFrame(faturamentos)
+        df_full["Falta Receber (Cliente)"] = df_full["Faturamento Bruto"] - df_full["Valor Recebido Cliente"]
+        df_full["Falta Pagar (Equipe)"] = df_full["Custos Operacionais + Logística"] - df_full["Valor Pago Equipe"]
+
+        st.dataframe(
+            df_full[[
+                "id", "Cliente", "Data Evento", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
+                "Custos Operacionais + Logística", "Valor Pago Equipe", "Falta Pagar (Equipe)", "Lucro Real",
+                "Lucro Miguel Araújo", "Lucro Antonio Carlos"
+            ]],
+            use_container_width=True
+        )
