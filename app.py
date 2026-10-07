@@ -38,6 +38,7 @@ def init_db():
             custo_sonorizacao REAL DEFAULT 0,
             custo_diretor REAL DEFAULT 0,
             custo_logistica REAL DEFAULT 0,
+            custo_fornecedor_externo REAL DEFAULT 0,
             val_recebido_cliente REAL DEFAULT 0,
             val_pago_equipe REAL DEFAULT 0,
             status_recebimento TEXT,
@@ -61,7 +62,8 @@ def init_db():
         "status_pagamento": "TEXT DEFAULT 'Pendente'",
         "lucro_real": "REAL DEFAULT 0",
         "lucro_miguel": "REAL DEFAULT 0",
-        "lucro_antonio": "REAL DEFAULT 0"
+        "lucro_antonio": "REAL DEFAULT 0",
+        "custo_fornecedor_externo": "REAL DEFAULT 0"
     }
     
     c.execute("PRAGMA table_info(eventos)")
@@ -115,6 +117,7 @@ def carregar_eventos():
             "Custo Sonorização": to_float(d.get("custo_sonorizacao")),
             "Custo Diretor": to_float(d.get("custo_diretor")),
             "Custo Logística": to_float(d.get("custo_logistica")),
+            "Custo Fornecedor Externo": to_float(d.get("custo_fornecedor_externo")),
             "Valor Recebido Cliente": to_float(d.get("val_recebido_cliente")),
             "Valor Pago Equipe": to_float(d.get("val_pago_equipe")),
             "Status Recebimento": d.get("status_recebimento") or "Pendente",
@@ -137,17 +140,18 @@ def salvar_evento_db(reg):
         INSERT INTO eventos (
             cliente, data_evento, horario, complexo, transmissao, aprovado, val_extra, itens_extras,
             faturamento_bruto, imposto_nf, custos_total, custo_resolume, custo_iluminacao, custo_sonorizacao,
-            custo_diretor, custo_logistica, val_recebido_cliente, val_pago_equipe, status_recebimento, status_pagamento,
-            lucro_real, lucro_miguel, lucro_antonio, pag_operacional, rec_champions, equipamentos, equipe_tecnica, observacoes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            custo_diretor, custo_logistica, custo_fornecedor_externo, val_recebido_cliente, val_pago_equipe,
+            status_recebimento, status_pagamento, lucro_real, lucro_miguel, lucro_antonio, pag_operacional,
+            rec_champions, equipamentos, equipe_tecnica, observacoes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         reg["Cliente"], reg["Data Evento"], reg["Horário"], reg["Complexo Champions"], reg["Transmissão TVs"],
         reg["Aprovado"], reg["Val. Extra"], json.dumps(reg["Itens Extras"]), reg["Faturamento Bruto"],
         reg["10% NF"], reg["Custos Operacionais + Logística"], reg["Custo Resolume"], reg["Custo Iluminação"],
-        reg["Custo Sonorização"], reg["Custo Diretor"], reg["Custo Logística"], reg["Valor Recebido Cliente"],
-        reg["Valor Pago Equipe"], reg["Status Recebimento"], reg["Status Pagamento"], reg["Lucro Real"],
-        reg["Lucro Miguel Araújo"], reg["Lucro Antonio Carlos"], reg["Pag. Operacional"], reg["Rec. Champions"],
-        reg["Equipamentos"], reg["Equipe Técnica"], reg["Observações"]
+        reg["Custo Sonorização"], reg["Custo Diretor"], reg["Custo Logística"], reg["Custo Fornecedor Externo"],
+        reg["Valor Recebido Cliente"], reg["Valor Pago Equipe"], reg["Status Recebimento"], reg["Status Pagamento"],
+        reg["Lucro Real"], reg["Lucro Miguel Araújo"], reg["Lucro Antonio Carlos"], reg["Pag. Operacional"],
+        reg["Rec. Champions"], reg["Equipamentos"], reg["Equipe Técnica"], reg["Observações"]
     ))
     conn.commit()
     conn.close()
@@ -159,18 +163,18 @@ def atualizar_evento_db(id_evento, reg):
         UPDATE eventos SET
             cliente=?, data_evento=?, horario=?, complexo=?, transmissao=?, aprovado=?, val_extra=?,
             itens_extras=?, faturamento_bruto=?, imposto_nf=?, custos_total=?, custo_resolume=?,
-            custo_iluminacao=?, custo_sonorizacao=?, custo_diretor=?, custo_logistica=?, val_recebido_cliente=?,
-            val_pago_equipe=?, status_recebimento=?, status_pagamento=?, lucro_real=?, lucro_miguel=?,
-            lucro_antonio=?, pag_operacional=?, rec_champions=?, equipamentos=?, equipe_tecnica=?, observacoes=?
+            custo_iluminacao=?, custo_sonorizacao=?, custo_diretor=?, custo_logistica=?, custo_fornecedor_externo=?,
+            val_recebido_cliente=?, val_pago_equipe=?, status_recebimento=?, status_pagamento=?, lucro_real=?,
+            lucro_miguel=?, lucro_antonio=?, pag_operacional=?, rec_champions=?, equipamentos=?, equipe_tecnica=?, observacoes=?
         WHERE id=?
     ''', (
         reg["Cliente"], reg["Data Evento"], reg["Horário"], reg["Complexo Champions"], reg["Transmissão TVs"],
         reg["Aprovado"], reg["Val. Extra"], json.dumps(reg["Itens Extras"]), reg["Faturamento Bruto"],
         reg["10% NF"], reg["Custos Operacionais + Logística"], reg["Custo Resolume"], reg["Custo Iluminação"],
-        reg["Custo Sonorização"], reg["Custo Diretor"], reg["Custo Logística"], reg["Valor Recebido Cliente"],
-        reg["Valor Pago Equipe"], reg["Status Recebimento"], reg["Status Pagamento"], reg["Lucro Real"],
-        reg["Lucro Miguel Araújo"], reg["Lucro Antonio Carlos"], reg["Pag. Operacional"], reg["Rec. Champions"],
-        reg["Equipamentos"], reg["Equipe Técnica"], reg["Observações"], id_evento
+        reg["Custo Sonorização"], reg["Custo Diretor"], reg["Custo Logística"], reg["Custo Fornecedor Externo"],
+        reg["Valor Recebido Cliente"], reg["Valor Pago Equipe"], reg["Status Recebimento"], reg["Status Pagamento"],
+        reg["Lucro Real"], reg["Lucro Miguel Araújo"], reg["Lucro Antonio Carlos"], reg["Pag. Operacional"],
+        reg["Rec. Champions"], reg["Equipamentos"], reg["Equipe Técnica"], reg["Observações"], id_evento
     ))
     conn.commit()
     conn.close()
@@ -182,7 +186,7 @@ def deletar_evento_db(id_evento):
     conn.commit()
     conn.close()
 
-# GERADOR DE PDF DUAL
+# GERADOR DE PDF DUAL COM ITENS EXTRAS DETALHADOS
 def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
@@ -197,6 +201,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     val_title_style = ParagraphStyle('ValTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.white)
     val_num_style = ParagraphStyle('ValNum', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#FFD700"), alignment=2)
 
+    # Logótipo
     if os.path.exists("logo.jpg"):
         story.append(RLImage("logo.jpg", width=560, height=130))
         story.append(Spacer(1, 10))
@@ -204,6 +209,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(RLImage("logo.png", width=560, height=130))
         story.append(Spacer(1, 10))
 
+    # 1. Identificação do Evento
     titulo_sec1 = "📌 ORÇAMENTO COMERCIAL E ESCOPO TÉCNICO" if tipo_documento == "ORCAMENTO" else "📌 RELATÓRIO DE CONTROLE FINANCEIRO INTERNO"
     sec1_hdr = Table([[Paragraph(titulo_sec1, sec_title_style)]], colWidths=[560])
     sec1_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
@@ -219,6 +225,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     story.append(t1)
     story.append(Spacer(1, 10))
 
+    # 2. Equipamentos Base
     sec2_hdr = Table([[Paragraph("🛠️ SETOR DE ENGENHARIA DE ÁUDIO, LUZ, VÍDEO & ESTRUTURA", sec_title_style)]], colWidths=[560])
     sec2_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(sec2_hdr)
@@ -227,13 +234,42 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     story.append(t2)
     story.append(Spacer(1, 10))
 
+    # 3. ITENS EXTRAS ADICIONADOS
+    itens_extras = registro.get("Itens Extras", [])
+    if itens_extras and len(itens_extras) > 0:
+        sec_ext_hdr = Table([[Paragraph("➕ ITENS E SERVIÇOS ADICIONAIS (EXTRAS)", sec_title_style)]], colWidths=[560])
+        sec_ext_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
+        story.append(sec_ext_hdr)
+
+        dados_extras = [[Paragraph("DESCRIÇÃO DO ITEM EXTRA", th_style), Paragraph("VALOR (R$)", th_style)]]
+        for item in itens_extras:
+            desc = item.get("Descrição") or item.get("Descricao") or "Item Extra"
+            val = float(item.get("Valor", 0.0))
+            dados_extras.append([
+                Paragraph(str(desc), td_style),
+                Paragraph(f"R$ {val:,.2f}", td_bold)
+            ])
+
+        t_extras = Table(dados_extras, colWidths=[420, 140])
+        t_extras.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EAE3D2")),
+            ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#FAF6EE")),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")),
+            ('PADDING', (0,0), (-1,-1), 5),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+        ]))
+        story.append(t_extras)
+        story.append(Spacer(1, 10))
+
+    # 4. Balanço Financeiro Interno (Apenas no PDF de Controle Financeiro)
     if tipo_documento == "FINANCEIRO":
         sec4_hdr = Table([[Paragraph("💰 BALANÇO FINANCEIRO & DIVISÃO DE LUCRO OPERACIONAL", sec_title_style)]], colWidths=[560])
         sec4_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
         story.append(sec4_hdr)
         dados_sec4 = [
             [Paragraph("Faturamento Bruto:", th_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", td_bold), Paragraph("Imposto Nota Fiscal (10%):", th_style), Paragraph(f"R$ {registro['10% NF']:,.2f}", td_style)],
-            [Paragraph("Custos Operacionais:", th_style), Paragraph(f"R$ {registro['Custos Operacionais + Logística']:,.2f}", td_style), Paragraph("Lucro Real Líquido:", th_style), Paragraph(f"R$ {registro['Lucro Real']:,.2f}", td_bold)],
+            [Paragraph("Custos Totais (Equipe + Extras):", th_style), Paragraph(f"R$ {registro['Custos Operacionais + Logística']:,.2f}", td_style), Paragraph("Fornecedor Externo (DJ/Internet):", th_style), Paragraph(f"R$ {registro['Custo Fornecedor Externo']:,.2f}", td_style)],
+            [Paragraph("<b>LUCRO REAL LÍQUIDO</b>", th_style), Paragraph(f"<b>R$ {registro['Lucro Real']:,.2f}</b>", td_bold), Paragraph("", th_style), Paragraph("", td_style)],
             [Paragraph("<b>PARTE MIGUEL ARAÚJO (50%)</b>", th_style), Paragraph(f"<b>R$ {registro['Lucro Miguel Araújo']:,.2f}</b>", td_bold), Paragraph("<b>PARTE ANTONIO CARLOS (50%)</b>", th_style), Paragraph(f"<b>R$ {registro['Lucro Antonio Carlos']:,.2f}</b>", td_bold)]
         ]
         t4 = Table(dados_sec4, colWidths=[140, 140, 140, 140])
@@ -241,6 +277,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(t4)
         story.append(Spacer(1, 12))
 
+    # Rodapé com Valor Global
     val_box = Table([[Paragraph(f"VALOR FINANCEIRO GLOBAL ({registro['Cliente']}):", val_title_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", val_num_style)]], colWidths=[360, 200])
     val_box.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 10), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
     story.append(val_box)
@@ -317,9 +354,9 @@ if faturamentos:
     kpi_col4.metric("📈 Lucro Líquido Real", f"R$ {lucro_liquido_total:,.2f}")
 
     kpi_col5, kpi_col6, kpi_col7, kpi_col8 = st.columns(4)
-    kpi_col5.metric("👥 Custo Total c/ Profissionais", f"R$ {total_custos_equipe:,.2f}")
-    kpi_col6.metric("💸 Total Já Pago à Equipe", f"R$ {total_pago_equipe:,.2f}")
-    kpi_col7.metric("⚠️ A Pagar (Devo à Equipe)", f"R$ {total_falta_pagar_equipe:,.2f}")
+    kpi_col5.metric("👥 Custo Total Operacional", f"R$ {total_custos_equipe:,.2f}")
+    kpi_col6.metric("💸 Total Já Pago (Equipe/Ext)", f"R$ {total_pago_equipe:,.2f}")
+    kpi_col7.metric("⚠️ A Pagar Pessoas/Serviços", f"R$ {total_falta_pagar_equipe:,.2f}")
     kpi_col8.metric("🧾 Impostos Reservados (10% NF)", f"R$ {total_impostos:,.2f}")
 
     st.markdown("---")
@@ -365,20 +402,21 @@ with aba1:
             imp_temp = fat_bruto_temp * 0.10
             st.success(f"**Faturamento Bruto:** R$ {fat_bruto_temp:,.2f}\n• Imposto (10% NF): R$ {imp_temp:,.2f}")
 
-        st.markdown("### 👥 5. Pagamentos Devidos a Profissionais / Logística")
-        col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns(5)
+        st.markdown("### 👥 5. Custos: Profissionais, Logística & Fornecedores Externos")
+        col_c1, col_c2, col_c3, col_c4, col_c5, col_c6 = st.columns(6)
         with col_c1: custo_resolume = st.number_input("Técnico Resolume (R$)", min_value=0.0, step=50.0)
         with col_c2: custo_iluminacao = st.number_input("Técnico Iluminação (R$)", min_value=0.0, step=50.0)
         with col_c3: custo_sonorizacao = st.number_input("Técnico Som (R$)", min_value=0.0, step=50.0)
         with col_c4: custo_diretor = st.number_input("Direção Técnica (R$)", min_value=0.0, step=50.0)
         with col_c5: custo_logistica = st.number_input("Logística / Frete (R$)", min_value=0.0, step=20.0)
+        with col_c6: custo_externo = st.number_input("Fornecedor Externo (DJ, Internet, etc.) (R$)", min_value=0.0, step=50.0)
 
         st.markdown("### 💳 6. Status Inicial de Caixa")
         col_st1, col_st2 = st.columns(2)
         with col_st1:
             val_recebido_init = st.number_input("Quanto o cliente JÁ PAGOU? (R$)", min_value=0.0, step=100.0, key="v_rec_init")
         with col_st2:
-            val_pago_equipe_init = st.number_input("Quanto você JÁ PAGOU à equipe? (R$)", min_value=0.0, step=100.0, key="v_pag_init")
+            val_pago_equipe_init = st.number_input("Quanto você JÁ PAGOU à equipe/fornecedores? (R$)", min_value=0.0, step=100.0, key="v_pag_init")
 
         col_d1, col_d2 = st.columns(2)
         with col_d1: dt_pag_operacional = st.date_input("Previsão Pagamento Operacional")
@@ -388,7 +426,7 @@ with aba1:
 
         faturamento_bruto = val_aprovado + val_extra_total
         imposto_nf = faturamento_bruto * 0.10
-        total_custos_op = custo_resolume + custo_iluminacao + custo_sonorizacao + custo_diretor + custo_logistica
+        total_custos_op = custo_resolume + custo_iluminacao + custo_sonorizacao + custo_diretor + custo_logistica + custo_externo
         lucro_real = faturamento_bruto - imposto_nf - total_custos_op
 
         status_rec = "Pago Total" if val_recebido_init >= faturamento_bruto and faturamento_bruto > 0 else ("Parcial" if val_recebido_init > 0 else "Pendente")
@@ -402,7 +440,7 @@ with aba1:
                 "Val. Extra": val_extra_total, "Itens Extras": df_extras_edit.to_dict('records') if not df_extras_edit.empty else [],
                 "Faturamento Bruto": faturamento_bruto, "10% NF": imposto_nf, "Custos Operacionais + Logística": total_custos_op,
                 "Custo Resolume": custo_resolume, "Custo Iluminação": custo_iluminacao, "Custo Sonorização": custo_sonorizacao,
-                "Custo Diretor": custo_diretor, "Custo Logística": custo_logistica,
+                "Custo Diretor": custo_diretor, "Custo Logística": custo_logistica, "Custo Fornecedor Externo": custo_externo,
                 "Valor Recebido Cliente": val_recebido_init, "Valor Pago Equipe": val_pago_equipe_init,
                 "Status Recebimento": status_rec, "Status Pagamento": status_pag,
                 "Lucro Real": lucro_real, "Lucro Miguel Araújo": lucro_real * 0.50, "Lucro Antonio Carlos": lucro_real * 0.50,
@@ -443,21 +481,22 @@ with aba2:
             st.markdown("---")
             c_pag1, c_pag2, c_pag3 = st.columns(3)
             with c_pag1:
-                e_custo_total = st.number_input("Custo Total Equipe (R$)", value=float(reg["Custos Operacionais + Logística"]))
+                e_custo_total = st.number_input("Custo Total Operacional (R$)", value=float(reg["Custos Operacionais + Logística"]))
             with c_pag2:
-                e_val_pago = st.number_input("Valor JÁ PAGO à Equipe (R$)", value=float(reg["Valor Pago Equipe"]))
+                e_val_pago = st.number_input("Valor JÁ PAGO à Equipe/Fornecedores (R$)", value=float(reg["Valor Pago Equipe"]))
             with c_pag3:
                 falta_pag = e_custo_total - e_val_pago
-                st.error(f"**Ainda Deve à Equipe:** R$ {falta_pag:,.2f}")
+                st.error(f"**Ainda Deve:** R$ {falta_pag:,.2f}")
 
             st.markdown("---")
-            st.markdown("### 🛠️ Cachês Individuais")
-            col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns(5)
+            st.markdown("### 🛠️ Cachês e Fornecedores Individuais")
+            col_p1, col_p2, col_p3, col_p4, col_p5, col_p6 = st.columns(6)
             with col_p1: e_resolume = st.number_input("Resolume (R$)", value=float(reg["Custo Resolume"]))
             with col_p2: e_iluminacao = st.number_input("Iluminação (R$)", value=float(reg["Custo Iluminação"]))
             with col_p3: e_sonorizacao = st.number_input("Som (R$)", value=float(reg["Custo Sonorização"]))
             with col_p4: e_diretor = st.number_input("Diretor (R$)", value=float(reg["Custo Diretor"]))
             with col_p5: e_logistica = st.number_input("Logística (R$)", value=float(reg["Custo Logística"]))
+            with col_p6: e_externo = st.number_input("Forn. Externo (DJ/Net) (R$)", value=float(reg.get("Custo Fornecedor Externo", 0.0)))
 
             e_obs = st.text_area("Observações", value=reg["Observações"])
 
@@ -468,7 +507,7 @@ with aba2:
                 btn_excluir_eve = st.form_submit_button("❌ Excluir Evento")
 
             if btn_salvar_baixa:
-                novos_custos = e_resolume + e_iluminacao + e_sonorizacao + e_diretor + e_logistica
+                novos_custos = e_resolume + e_iluminacao + e_sonorizacao + e_diretor + e_logistica + e_externo
                 novo_imposto = e_fat_bruto * 0.10
                 novo_lucro = e_fat_bruto - novo_imposto - novos_custos
 
@@ -481,7 +520,7 @@ with aba2:
                     "Aprovado": reg["Aprovado"], "Val. Extra": reg["Val. Extra"], "Itens Extras": reg["Itens Extras"],
                     "Faturamento Bruto": e_fat_bruto, "10% NF": novo_imposto, "Custos Operacionais + Logística": novos_custos,
                     "Custo Resolume": e_resolume, "Custo Iluminação": e_iluminacao, "Custo Sonorização": e_sonorizacao,
-                    "Custo Diretor": e_diretor, "Custo Logística": e_logistica,
+                    "Custo Diretor": e_diretor, "Custo Logística": e_logistica, "Custo Fornecedor Externo": e_externo,
                     "Valor Recebido Cliente": e_val_rec, "Valor Pago Equipe": e_val_pago,
                     "Status Recebimento": st_rec, "Status Pagamento": st_pag,
                     "Lucro Real": novo_lucro, "Lucro Miguel Araújo": novo_lucro * 0.50, "Lucro Antonio Carlos": novo_lucro * 0.50,
@@ -523,12 +562,12 @@ with aba3:
         
         df_full = pd.DataFrame(faturamentos)
         df_full["Falta Receber (Cliente)"] = df_full["Faturamento Bruto"] - df_full["Valor Recebido Cliente"]
-        df_full["Falta Pagar (Equipe)"] = df_full["Custos Operacionais + Logística"] - df_full["Valor Pago Equipe"]
+        df_full["Falta Pagar (Equipe/Ext)"] = df_full["Custos Operacionais + Logística"] - df_full["Valor Pago Equipe"]
 
         st.dataframe(
             df_full[[
                 "id", "Cliente", "Data Evento", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
-                "Custos Operacionais + Logística", "Valor Pago Equipe", "Falta Pagar (Equipe)", "Lucro Real",
+                "Custos Operacionais + Logística", "Custo Fornecedor Externo", "Valor Pago Equipe", "Falta Pagar (Equipe/Ext)", "Lucro Real",
                 "Lucro Miguel Araújo", "Lucro Antonio Carlos"
             ]],
             use_container_width=True
