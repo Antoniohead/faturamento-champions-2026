@@ -221,7 +221,7 @@ def deletar_evento_db(id_evento):
     conn.commit()
     conn.close()
 
-# GERADOR DE PDF DUAL COM AJUSTES DE EQUIPE, IMPOSTOS E CONDICIONAL DE RODAPÉ
+# GERADOR DE PDF DUAL
 def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
@@ -235,9 +235,6 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     td_status = ParagraphStyle('TDStatus', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.HexColor("#2E7D32"), alignment=1)
     val_title_style = ParagraphStyle('ValTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.white)
     val_num_style = ParagraphStyle('ValNum', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#FFD700"), alignment=2)
-    
-    # Estilo das Notas de Convenção
-    nota_title_style = ParagraphStyle('NotaTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.HexColor("#2A201C"), spaceAfter=3)
     nota_text_style = ParagraphStyle('NotaText', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.HexColor("#4A3E39"), leading=9)
 
     # Logótipo
@@ -259,14 +256,12 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         dt_montagem_str = "Não informada"
 
     if tipo_documento == "ORCAMENTO":
-        # No orçamento do CLIENTE, REMOVE a Equipe Escalada
         dados_sec1 = [
             [Paragraph("CLIENTE / EMPRESA", th_style), Paragraph(str(registro["Cliente"]), td_bold), Paragraph("DATA DO EVENTO", th_style), Paragraph(f"{registro['Data Evento']} ({registro['Horário']})", td_style)],
             [Paragraph("LOCAL / ESPAÇO", th_style), Paragraph(str(registro["Complexo / Local"]), td_style), Paragraph("DATA MONTAGEM", th_style), Paragraph(dt_montagem_str, td_style)],
             [Paragraph("OBSERVAÇÕES", th_style), Paragraph(str(registro["Observações"]), td_style), Paragraph("", th_style), Paragraph("", td_style)]
         ]
     else:
-        # No relatório INTERNO, MANTÉM a Equipe Escalada
         dados_sec1 = [
             [Paragraph("CLIENTE / EMPRESA", th_style), Paragraph(str(registro["Cliente"]), td_bold), Paragraph("DATA DO EVENTO", th_style), Paragraph(f"{registro['Data Evento']} ({registro['Horário']})", td_style)],
             [Paragraph("LOCAL / ESPAÇO", th_style), Paragraph(str(registro["Complexo / Local"]), td_style), Paragraph("DATA MONTAGEM", th_style), Paragraph(dt_montagem_str, td_style)],
@@ -287,7 +282,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     story.append(t2)
     story.append(Spacer(1, 10))
 
-    # 3. RESUMO FINANCEIRO DO ORÇAMENTO (VALOR BASE + ADICIONAIS + IMPOSTO NEGOCIÁVEL)
+    # 3. RESUMO FINANCEIRO
     val_base = float(registro.get("Aprovado", 0.0))
     val_extra_tot = float(registro.get("Val. Extra", 0.0))
     val_imposto = float(registro.get("10% NF", 0.0))
@@ -320,7 +315,6 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
                 Paragraph(f"<b>R$ {val_extra_tot:,.2f}</b>", td_bold)
             ])
 
-        # Destaca o Imposto NF caso seja Por Conta do Cliente
         if resp_imposto == "Por Conta do Cliente":
             dados_orc_resumo.append([
                 Paragraph("<b>IMPOSTOS E ENCARGOS FISCAIS (10% NF)</b>", th_style),
@@ -339,7 +333,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(t_orc_resumo)
         story.append(Spacer(1, 10))
 
-    # 4. Balanço Financeiro Interno e Fornecedores
+    # 4. Balanço Financeiro Interno
     if tipo_documento == "FINANCEIRO":
         if itens_extras and len(itens_extras) > 0:
             sec_ext_hdr = Table([[Paragraph("➕ ITENS E SERVIÇOS ADICIONAIS (EXTRAS)", sec_title_style)]], colWidths=[560])
@@ -399,12 +393,10 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(t4)
         story.append(Spacer(1, 12))
 
-    # Valor Global
     val_box = Table([[Paragraph(f"VALOR FINANCEIRO GLOBAL ({registro['Cliente']}):", val_title_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", val_num_style)]], colWidths=[360, 200])
     val_box.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 10), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
     story.append(val_box)
 
-    # 5. NOTAS DE CONVENÇÃO E CONDIÇÕES GERAIS (INCLUÍDO NO ORÇAMENTO DO CLIENTE)
     if tipo_documento == "ORCAMENTO":
         story.append(Spacer(1, 12))
         texto_notas = """
@@ -468,10 +460,24 @@ st.markdown("---")
 
 faturamentos = carregar_eventos()
 
-# PAINEL GERAL DE INDICADORES (KPIs)
+# --- PAINEL GERAL DE INDICADORES (COM FILTRO POR CLIENTE) ---
 if faturamentos:
-    df_kpi = pd.DataFrame(faturamentos)
+    df_kpi_raw = pd.DataFrame(faturamentos)
     
+    # Lista de clientes únicos para seleção
+    clientes_unicos = sorted(list(set(df_kpi_raw["Cliente"].dropna().tolist())))
+    opcoes_filtro_cliente = ["Todos os Clientes (Consolidado Geral)"] + clientes_unicos
+    
+    st.markdown("## 📊 Controle Financeiro por Cliente")
+    cliente_selecionado_kpi = st.selectbox("🔍 Selecione o Cliente para filtrar os indicadores:", opcoes_filtro_cliente)
+    
+    if cliente_selecionado_kpi != "Todos os Clientes (Consolidado Geral)":
+        df_kpi = df_kpi_raw[df_kpi_raw["Cliente"] == cliente_selecionado_kpi]
+        lbl_contexto = f"Cliente: {cliente_selecionado_kpi}"
+    else:
+        df_kpi = df_kpi_raw
+        lbl_contexto = "Consolidado Geral"
+
     total_faturado = float(df_kpi["Faturamento Bruto"].sum())
     total_custos_equipe = float(df_kpi["Custos Operacionais + Logística"].sum())
     total_impostos = float(df_kpi["10% NF"].sum())
@@ -484,8 +490,8 @@ if faturamentos:
     
     lucro_liquido_total = float(df_kpi["Lucro Real"].sum())
 
-    st.markdown("## 📊 Controle Financeiro Consolidado")
-    
+    st.caption(f"Exibindo dados de: **{lbl_contexto}** ({len(df_kpi)} evento(s) encontrado(s))")
+
     kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
     kpi_col1.metric("💵 Faturamento Bruto", f"R$ {total_faturado:,.2f}")
     kpi_col2.metric("✅ Total Recebido (Cliente)", f"R$ {total_recebido:,.2f}")
@@ -497,6 +503,37 @@ if faturamentos:
     kpi_col6.metric("💸 Total Já Pago (Equipe/Ext)", f"R$ {total_pago_equipe:,.2f}")
     kpi_col7.metric("⚠️ A Pagar Pessoas/Serviços", f"R$ {total_falta_pagar_equipe:,.2f}")
     kpi_col8.metric("🧾 Impostos Reservados (10% NF)", f"R$ {total_impostos:,.2f}")
+
+    # RESUMO COMPARATIVO POR CLIENTE
+    with st.expander("🏢 Visão Consolidada Comparativa por Cliente (Tabela)", expanded=False):
+        df_agrupado = df_kpi_raw.groupby("Cliente").agg({
+            "id": "count",
+            "Faturamento Bruto": "sum",
+            "Valor Recebido Cliente": "sum",
+            "Custos Operacionais + Logística": "sum",
+            "Valor Pago Equipe": "sum",
+            "Lucro Real": "sum"
+        }).reset_index()
+
+        df_agrupado.rename(columns={
+            "id": "Qtd Eventos",
+            "Faturamento Bruto": "Faturamento Total",
+            "Valor Recebido Cliente": "Total Recebido",
+            "Custos Operacionais + Logística": "Custos Totais",
+            "Valor Pago Equipe": "Total Pago Equipe",
+            "Lucro Real": "Lucro Líquido Total"
+        }, inplace=True)
+
+        df_agrupado["A Receber"] = df_agrupado["Faturamento Total"] - df_agrupado["Total Recebido"]
+        df_agrupado["A Pagar"] = df_agrupado["Custos Totais"] - df_agrupado["Total Pago Equipe"]
+
+        st.dataframe(
+            df_agrupado[[
+                "Cliente", "Qtd Eventos", "Faturamento Total", "Total Recebido", "A Receber",
+                "Custos Totais", "Total Pago Equipe", "A Pagar", "Lucro Líquido Total"
+            ]],
+            use_container_width=True
+        )
 
     st.markdown("---")
 
@@ -546,7 +583,7 @@ with aba1:
         elif resp_imposto == "Incluso no Valor":
             imposto_nf_calc = base_e_extra * 0.10
             faturamento_bruto_calc = base_e_extra
-        else: # Isento
+        else:
             imposto_nf_calc = 0.0
             faturamento_bruto_calc = base_e_extra
 
@@ -590,9 +627,8 @@ with aba1:
 
         total_custos_op = custo_resolume + custo_iluminacao + custo_sonorizacao + custo_diretor + custo_logistica + custo_externo_total
         
-        # Lucro Real considerando a retenção do imposto
         if resp_imposto == "Por Conta do Cliente":
-            lucro_real = (faturamento_bruto_calc - imposto_nf_calc) - imposto_nf_calc - total_custos_op # Cliente paga o imposto por fora
+            lucro_real = (faturamento_bruto_calc - imposto_nf_calc) - imposto_nf_calc - total_custos_op
         else:
             lucro_real = faturamento_bruto_calc - imposto_nf_calc - total_custos_op
 
