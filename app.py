@@ -25,8 +25,9 @@ def init_db():
             cliente TEXT,
             data_evento TEXT,
             horario TEXT,
+            data_montagem TEXT DEFAULT '',
+            horario_montagem TEXT DEFAULT '',
             complexo TEXT,
-            transmissao TEXT,
             aprovado REAL DEFAULT 0,
             val_extra REAL DEFAULT 0,
             itens_extras TEXT DEFAULT '[]',
@@ -58,6 +59,8 @@ def init_db():
     conn.commit()
     
     colunas_necessarias = {
+        "data_montagem": "TEXT DEFAULT ''",
+        "horario_montagem": "TEXT DEFAULT ''",
         "val_recebido_cliente": "REAL DEFAULT 0",
         "val_pago_equipe": "REAL DEFAULT 0",
         "status_recebimento": "TEXT DEFAULT 'Pendente'",
@@ -127,8 +130,9 @@ def carregar_eventos():
             "Cliente": d.get("cliente") or "Não informado",
             "Data Evento": d.get("data_evento") or "",
             "Horário": d.get("horario") or "",
-            "Complexo Champions": d.get("complexo") or "",
-            "Transmissão TVs": d.get("transmissao") or "Não",
+            "Data Montagem": d.get("data_montagem") or "",
+            "Horário Montagem": d.get("horario_montagem") or "",
+            "Complexo / Local": d.get("complexo") or "",
             "Aprovado": to_float(d.get("aprovado")),
             "Val. Extra": to_float(d.get("val_extra")),
             "Itens Extras": parse_json_safely(d.get("itens_extras")),
@@ -163,14 +167,14 @@ def salvar_evento_db(reg):
     c = conn.cursor()
     c.execute('''
         INSERT INTO eventos (
-            cliente, data_evento, horario, complexo, transmissao, aprovado, val_extra, itens_extras,
+            cliente, data_evento, horario, data_montagem, horario_montagem, complexo, aprovado, val_extra, itens_extras,
             faturamento_bruto, imposto_nf, custos_total, custo_resolume, custo_iluminacao, custo_sonorizacao,
             custo_diretor, custo_logistica, custo_fornecedor_externo, desc_fornecedor_externo, fornecedores_externos,
             val_recebido_cliente, val_pago_equipe, status_recebimento, status_pagamento, lucro_real, lucro_miguel,
             lucro_antonio, pag_operacional, rec_champions, equipamentos, equipe_tecnica, observacoes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        reg["Cliente"], reg["Data Evento"], reg["Horário"], reg["Complexo Champions"], reg["Transmissão TVs"],
+        reg["Cliente"], reg["Data Evento"], reg["Horário"], reg["Data Montagem"], reg["Horário Montagem"], reg["Complexo / Local"],
         reg["Aprovado"], reg["Val. Extra"], json.dumps(reg["Itens Extras"]), reg["Faturamento Bruto"],
         reg["10% NF"], reg["Custos Operacionais + Logística"], reg["Custo Resolume"], reg["Custo Iluminação"],
         reg["Custo Sonorização"], reg["Custo Diretor"], reg["Custo Logística"], reg["Custo Fornecedor Externo"],
@@ -187,7 +191,7 @@ def atualizar_evento_db(id_evento, reg):
     c = conn.cursor()
     c.execute('''
         UPDATE eventos SET
-            cliente=?, data_evento=?, horario=?, complexo=?, transmissao=?, aprovado=?, val_extra=?,
+            cliente=?, data_evento=?, horario=?, data_montagem=?, horario_montagem=?, complexo=?, aprovado=?, val_extra=?,
             itens_extras=?, faturamento_bruto=?, imposto_nf=?, custos_total=?, custo_resolume=?,
             custo_iluminacao=?, custo_sonorizacao=?, custo_diretor=?, custo_logistica=?, custo_fornecedor_externo=?,
             desc_fornecedor_externo=?, fornecedores_externos=?, val_recebido_cliente=?, val_pago_equipe=?,
@@ -195,7 +199,7 @@ def atualizar_evento_db(id_evento, reg):
             pag_operacional=?, rec_champions=?, equipamentos=?, equipe_tecnica=?, observacoes=?
         WHERE id=?
     ''', (
-        reg["Cliente"], reg["Data Evento"], reg["Horário"], reg["Complexo Champions"], reg["Transmissão TVs"],
+        reg["Cliente"], reg["Data Evento"], reg["Horário"], reg["Data Montagem"], reg["Horário Montagem"], reg["Complexo / Local"],
         reg["Aprovado"], reg["Val. Extra"], json.dumps(reg["Itens Extras"]), reg["Faturamento Bruto"],
         reg["10% NF"], reg["Custos Operacionais + Logística"], reg["Custo Resolume"], reg["Custo Iluminação"],
         reg["Custo Sonorização"], reg["Custo Diretor"], reg["Custo Logística"], reg["Custo Fornecedor Externo"],
@@ -214,7 +218,7 @@ def deletar_evento_db(id_evento):
     conn.commit()
     conn.close()
 
-# GERADOR DE PDF DUAL COM VALOR BASE E EXTRAS DETALHADOS NO ORÇAMENTO
+# GERADOR DE PDF DUAL FLEXÍVEL PARA QUALQUER CLIENTE
 def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
@@ -243,10 +247,14 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     sec1_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(sec1_hdr)
     
+    dt_montagem_str = f"{registro.get('Data Montagem', '')} {registro.get('Horário Montagem', '')}".strip()
+    if not dt_montagem_str:
+        dt_montagem_str = "Não informada"
+
     dados_sec1 = [
-        [Paragraph("CLIENTE / EMPRESA", th_style), Paragraph(str(registro["Cliente"]), td_bold), Paragraph("DATA DO EVENTO", th_style), Paragraph(str(registro["Data Evento"]), td_style)],
-        [Paragraph("COMPLEXO / SETOR", th_style), Paragraph(str(registro["Complexo Champions"]), td_style), Paragraph("HORÁRIO", th_style), Paragraph(str(registro["Horário"]), td_style)],
-        [Paragraph("TRANSMISSÃO TVs", th_style), Paragraph(str(registro["Transmissão TVs"]), td_style), Paragraph("OBSERVAÇÕES", th_style), Paragraph(str(registro["Observações"]), td_style)]
+        [Paragraph("CLIENTE / EMPRESA", th_style), Paragraph(str(registro["Cliente"]), td_bold), Paragraph("DATA DO EVENTO", th_style), Paragraph(f"{registro['Data Evento']} ({registro['Horário']})", td_style)],
+        [Paragraph("LOCAL / ESPAÇO", th_style), Paragraph(str(registro["Complexo / Local"]), td_style), Paragraph("DATA MONTAGEM", th_style), Paragraph(dt_montagem_str, td_style)],
+        [Paragraph("EQUIPE ESCALADA", th_style), Paragraph(str(registro["Equipe Técnica"]).replace('\n', '<br/>'), td_style), Paragraph("OBSERVAÇÕES", th_style), Paragraph(str(registro["Observações"]), td_style)]
     ]
     t1 = Table(dados_sec1, colWidths=[110, 170, 110, 170])
     t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF6EE")), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")), ('PADDING', (0,0), (-1,-1), 5)]))
@@ -262,7 +270,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     story.append(t2)
     story.append(Spacer(1, 10))
 
-    # 3. RESUMO FINANCEIRO DO ORÇAMENTO (VALOR BASE + ADICIONAIS EXTRAS)
+    # 3. RESUMO FINANCEIRO DO ORÇAMENTO
     val_base = float(registro.get("Aprovado", 0.0))
     val_extra_tot = float(registro.get("Val. Extra", 0.0))
     itens_extras = registro.get("Itens Extras", [])
@@ -283,7 +291,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
                 val = float(item.get("Valor", 0.0))
                 dados_orc_resumo.append([
                     Paragraph(f"➕ Extra: {desc}", td_style),
-                    Paragraph("Item Solicitado ", td_style),
+                    Paragraph("Item Solicitado Adicionalmente", td_style),
                     Paragraph(f"R$ {val:,.2f}", td_bold)
                 ])
 
@@ -304,7 +312,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(t_orc_resumo)
         story.append(Spacer(1, 10))
 
-    # 4. Balanço Financeiro Interno e Fornecedores (Apenas no PDF de Controle Financeiro)
+    # 4. Balanço Financeiro Interno e Fornecedores
     if tipo_documento == "FINANCEIRO":
         if itens_extras and len(itens_extras) > 0:
             sec_ext_hdr = Table([[Paragraph("➕ ITENS E SERVIÇOS ADICIONAIS (EXTRAS)", sec_title_style)]], colWidths=[560])
@@ -455,13 +463,13 @@ with aba1:
         st.markdown("### 📋 1. Identificação do Evento")
         col1, col2, col3 = st.columns(3)
         with col1:
-            cliente = st.text_input("Cliente / Empresa", value="CHAMPIONS LEAGUE EXPERIENCE BRASIL")
+            cliente = st.text_input("Cliente / Empresa", placeholder="Digite o nome do cliente/empresa...")
             data_evento = st.date_input("Data do Evento", datetime.now())
-            horario = st.text_input("Horário", value="08h às 18h")
+            horario = st.text_input("Horário do Evento", value="08h às 18h")
         with col2:
-            locais_selecionados = st.multiselect("Complexo Champions League", ["Arena", "Sala Glass", "Rooftop Maior", "Rooftop Menor"], default=["Arena"])
-            local_str = ", ".join(locais_selecionados) if locais_selecionados else "Não informado"
-            transmissao = st.radio("Transmissão para TVs?", ["Sim", "Não"], horizontal=True)
+            complexo_local = st.text_input("Local / Espaço do Evento", placeholder="Ex: Arena, Rooftop, Espaço das Américas...")
+            data_montagem = st.date_input("Data da Montagem", datetime.now())
+            horario_montagem = st.text_input("Horário da Montagem", value="06h às 10h")
         with col3:
             equipe_tecnica = st.text_area("Descrição da Equipe Escalada", placeholder="Ex: 1 Tech Resolume, 1 Iluminação, 1 Som...")
 
@@ -469,7 +477,7 @@ with aba1:
         equipamentos_contrato = st.text_area("Equipamentos em Contrato", placeholder="Ex: Painéis LED, Processadores, Microfones...")
 
         st.markdown("### ➕ 3. Adicionais e Extras")
-        df_extras_init = pd.DataFrame([{"Descrição": "Painel de LED Adicional", "Valor": 0.0}])
+        df_extras_init = pd.DataFrame([{"Descrição": "", "Valor": 0.0}])
         df_extras_edit = st.data_editor(
             df_extras_init, num_rows="dynamic", use_container_width=True,
             column_config={
@@ -497,7 +505,7 @@ with aba1:
         with col_c5: custo_logistica = st.number_input("Logística / Frete (R$)", min_value=0.0, step=20.0)
 
         st.markdown("#### 🌐 Fornecedores Externos (Ex: DJ, Internet Dedicada, Gerador, etc.)")
-        df_forn_init = pd.DataFrame([{"Descrição": "Internet Link Dedicado 100MB", "Valor": 0.0}])
+        df_forn_init = pd.DataFrame([{"Descrição": "", "Valor": 0.0}])
         df_forn_edit = st.data_editor(
             df_forn_init, num_rows="dynamic", use_container_width=True,
             column_config={
@@ -534,18 +542,35 @@ with aba1:
         st.markdown("---")
         if st.button("💾 Gravar Evento no Controle Financeiro", use_container_width=True):
             novo_registro = {
-                "Cliente": cliente, "Data Evento": data_evento.strftime("%d/%m/%Y"), "Horário": horario,
-                "Complexo Champions": local_str, "Transmissão TVs": transmissao, "Aprovado": val_aprovado,
-                "Val. Extra": val_extra_total, "Itens Extras": df_extras_edit.to_dict('records') if not df_extras_edit.empty else [],
-                "Faturamento Bruto": faturamento_bruto, "10% NF": imposto_nf, "Custos Operacionais + Logística": total_custos_op,
-                "Custo Resolume": custo_resolume, "Custo Iluminação": custo_iluminacao, "Custo Sonorização": custo_sonorizacao,
-                "Custo Diretor": custo_diretor, "Custo Logística": custo_logistica,
-                "Custo Fornecedor Externo": custo_externo_total, "Desc. Fornecedor Externo": desc_externo_concat,
+                "Cliente": cliente if cliente else "Não informado",
+                "Data Evento": data_evento.strftime("%d/%m/%Y"),
+                "Horário": horario,
+                "Data Montagem": data_montagem.strftime("%d/%m/%Y"),
+                "Horário Montagem": horario_montagem,
+                "Complexo / Local": complexo_local if complexo_local else "Não informado",
+                "Aprovado": val_aprovado,
+                "Val. Extra": val_extra_total,
+                "Itens Extras": df_extras_edit.to_dict('records') if not df_extras_edit.empty else [],
+                "Faturamento Bruto": faturamento_bruto,
+                "10% NF": imposto_nf,
+                "Custos Operacionais + Logística": total_custos_op,
+                "Custo Resolume": custo_resolume,
+                "Custo Iluminação": custo_iluminacao,
+                "Custo Sonorização": custo_sonorizacao,
+                "Custo Diretor": custo_diretor,
+                "Custo Logística": custo_logistica,
+                "Custo Fornecedor Externo": custo_externo_total,
+                "Desc. Fornecedor Externo": desc_externo_concat,
                 "Fornecedores Externos": fornecedores_externos_novo,
-                "Valor Recebido Cliente": val_recebido_init, "Valor Pago Equipe": val_pago_equipe_init,
-                "Status Recebimento": status_rec, "Status Pagamento": status_pag,
-                "Lucro Real": lucro_real, "Lucro Miguel Araújo": lucro_real * 0.50, "Lucro Antonio Carlos": lucro_real * 0.50,
-                "Pag. Operacional": dt_pag_operacional.strftime("%d/%m/%Y"), "Rec. Champions": dt_rec_champions.strftime("%d/%m/%Y"),
+                "Valor Recebido Cliente": val_recebido_init,
+                "Valor Pago Equipe": val_pago_equipe_init,
+                "Status Recebimento": status_rec,
+                "Status Pagamento": status_pag,
+                "Lucro Real": lucro_real,
+                "Lucro Miguel Araújo": lucro_real * 0.50,
+                "Lucro Antonio Carlos": lucro_real * 0.50,
+                "Pag. Operacional": dt_pag_operacional.strftime("%d/%m/%Y"),
+                "Rec. Champions": dt_rec_champions.strftime("%d/%m/%Y"),
                 "Equipamentos": equipamentos_contrato if equipamentos_contrato else "Não especificado",
                 "Equipe Técnica": equipe_tecnica if equipe_tecnica else "Não especificado",
                 "Observações": obs_gerais if obs_gerais else "Nenhuma observação."
@@ -580,19 +605,16 @@ with aba2:
                 except Exception:
                     dt_parsed = datetime.now().date()
                 e_data_evento = st.date_input("Data do Evento", value=dt_parsed)
-                e_horario = st.text_input("Horário", value=reg["Horário"])
+                e_horario = st.text_input("Horário do Evento", value=reg["Horário"])
 
             with ce_col2:
-                locais_atuais = [loc.strip() for loc in reg["Complexo Champions"].split(",") if loc.strip()]
-                opcoes_locais = ["Arena", "Sala Glass", "Rooftop Maior", "Rooftop Menor"]
-                for loc in locais_atuais:
-                    if loc and loc not in opcoes_locais:
-                        opcoes_locais.append(loc)
-                e_locais_sel = st.multiselect("Complexo Champions League", opcoes_locais, default=locais_atuais)
-                e_local_str = ", ".join(e_locais_sel) if e_locais_sel else "Não informado"
-                
-                idx_trans = 0 if reg["Transmissão TVs"] == "Sim" else 1
-                e_transmissao = st.radio("Transmissão para TVs?", ["Sim", "Não"], index=idx_trans, horizontal=True)
+                e_complexo_local = st.text_input("Local / Espaço do Evento", value=reg["Complexo / Local"])
+                try:
+                    dt_mont_parsed = datetime.strptime(reg["Data Montagem"], "%d/%m/%Y").date() if reg["Data Montagem"] else datetime.now().date()
+                except Exception:
+                    dt_mont_parsed = datetime.now().date()
+                e_data_montagem = st.date_input("Data da Montagem", value=dt_mont_parsed)
+                e_horario_montagem = st.text_input("Horário da Montagem", value=reg["Horário Montagem"])
 
             with ce_col3:
                 e_equipe_tecnica = st.text_area("Descrição da Equipe Escalada", value=reg["Equipe Técnica"])
@@ -677,8 +699,9 @@ with aba2:
                     "Cliente": e_cliente,
                     "Data Evento": e_data_evento.strftime("%d/%m/%Y"),
                     "Horário": e_horario,
-                    "Complexo Champions": e_local_str,
-                    "Transmissão TVs": e_transmissao,
+                    "Data Montagem": e_data_montagem.strftime("%d/%m/%Y"),
+                    "Horário Montagem": e_horario_montagem,
+                    "Complexo / Local": e_complexo_local,
                     "Aprovado": e_val_aprovado,
                     "Val. Extra": e_val_extra_total,
                     "Itens Extras": extras_atualizados_list,
@@ -745,7 +768,7 @@ with aba3:
 
         st.dataframe(
             df_full[[
-                "id", "Cliente", "Data Evento", "Aprovado", "Val. Extra", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
+                "id", "Cliente", "Data Evento", "Complexo / Local", "Aprovado", "Val. Extra", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
                 "Custos Operacionais + Logística", "Desc. Fornecedor Externo", "Custo Fornecedor Externo", "Valor Pago Equipe", "Falta Pagar (Equipe/Ext)", "Lucro Real",
                 "Lucro Miguel Araújo", "Lucro Antonio Carlos"
             ]],
