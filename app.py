@@ -221,6 +221,20 @@ def deletar_evento_db(id_evento):
     conn.commit()
     conn.close()
 
+def gerar_excel_backup(eventos):
+    df_export = pd.DataFrame(eventos)
+    df_export["Itens Extras (Texto)"] = df_export["Itens Extras"].apply(lambda x: json.dumps(x, ensure_ascii=False))
+    df_export["Fornecedores Externos (Texto)"] = df_export["Fornecedores Externos"].apply(lambda x: json.dumps(x, ensure_ascii=False))
+    
+    cols_drop = ["Itens Extras", "Fornecedores Externos"]
+    df_export_clean = df_export.drop(columns=[c for c in cols_drop if c in df_export.columns])
+    
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_export_clean.to_excel(writer, index=False, sheet_name='Eventos_Backup')
+    output.seek(0)
+    return output
+
 # GERADOR DE PDF DUAL
 def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer = io.BytesIO()
@@ -464,7 +478,6 @@ faturamentos = carregar_eventos()
 if faturamentos:
     df_kpi_raw = pd.DataFrame(faturamentos)
     
-    # Lista de clientes únicos para seleção
     clientes_unicos = sorted(list(set(df_kpi_raw["Cliente"].dropna().tolist())))
     opcoes_filtro_cliente = ["Todos os Clientes (Consolidado Geral)"] + clientes_unicos
     
@@ -504,7 +517,6 @@ if faturamentos:
     kpi_col7.metric("⚠️ A Pagar Pessoas/Serviços", f"R$ {total_falta_pagar_equipe:,.2f}")
     kpi_col8.metric("🧾 Impostos Reservados (10% NF)", f"R$ {total_impostos:,.2f}")
 
-    # RESUMO COMPARATIVO POR CLIENTE
     with st.expander("🏢 Visão Consolidada Comparativa por Cliente (Tabela)", expanded=False):
         df_agrupado = df_kpi_raw.groupby("Cliente").agg({
             "id": "count",
@@ -856,7 +868,7 @@ with aba2:
                 st.warning("🗑️ Evento excluído!")
                 st.rerun()
 
-# ABA 3: TABELA DETALHADA E GERADOR DE PDF
+# ABA 3: TABELA DETALHADA, GERADOR DE PDF E BACKUP EXCEL
 with aba3:
     st.subheader("📄 Emissão de Documentos e PDFs")
     if faturamentos:
@@ -876,6 +888,29 @@ with aba3:
         with col_btn2:
             pdf_financeiro = gerar_pdf_evento(reg_sel, tipo_documento="FINANCEIRO")
             st.download_button("📊 Baixar CONTROLE (Interno)", data=pdf_financeiro, file_name=f"Controle_{reg_sel['Cliente']}.pdf", mime="application/pdf", use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("💾 Backup de Dados (Segurança)")
+        col_bkp1, col_bkp2 = st.columns(2)
+        with col_bkp1:
+            excel_bytes = gerar_excel_backup(faturamentos)
+            st.download_button(
+                "📥 Baixar Backup Completo em Excel (.xlsx)",
+                data=excel_bytes,
+                file_name=f"Backup_Eventos_Financeiro_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        with col_bkp2:
+            df_csv = pd.DataFrame(faturamentos)
+            csv_data = df_csv.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📄 Baixar Backup em CSV",
+                data=csv_data,
+                file_name=f"Backup_Eventos_{datetime.now().strftime('%d_%m_%Y')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
 
         st.markdown("---")
         st.subheader("📋 Relatório Geral Financeiro")
