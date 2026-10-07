@@ -6,6 +6,12 @@ import io
 import sqlite3
 import json
 
+# ReportLab para geração de PDFs
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+
 # --- CONFIGURAÇÃO E PERSISTÊNCIA VIA SQLITE ---
 DB_NAME = "eventos.db"
 
@@ -13,7 +19,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
-    # Cria a tabela caso não exista
     c.execute('''
         CREATE TABLE IF NOT EXISTS eventos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +54,6 @@ def init_db():
     ''')
     conn.commit()
     
-    # Migration: Adiciona colunas que podem estar faltando em bancos antigos
     colunas_necessarias = {
         "val_recebido_cliente": "REAL DEFAULT 0",
         "val_pago_equipe": "REAL DEFAULT 0",
@@ -72,7 +76,7 @@ def init_db():
 
 def carregar_eventos():
     conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row  # Permite acessar colunas pelo nome com segurança
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute('SELECT * FROM eventos ORDER BY id DESC')
     rows = c.fetchall()
@@ -82,7 +86,6 @@ def carregar_eventos():
     for row in rows:
         d = dict(row)
         
-        # Converte valores numéricos e previne valores None/Nulos
         def to_float(val):
             try:
                 return float(val) if val is not None else 0.0
@@ -179,7 +182,74 @@ def deletar_evento_db(id_evento):
     conn.commit()
     conn.close()
 
-# Inicializa e migra o Banco de Dados
+# GERADOR DE PDF DUAL
+def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
+    story = []
+    styles = getSampleStyleSheet()
+    
+    sec_title_style = ParagraphStyle('SecTitle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.white, spaceAfter=0)
+    th_style = ParagraphStyle('TH', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.HexColor("#2A201C"))
+    td_style = ParagraphStyle('TD', parent=styles['Normal'], fontName='Helvetica', fontSize=8, textColor=colors.HexColor("#1A1412"))
+    td_bold = ParagraphStyle('TDBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.HexColor("#1A1412"))
+    td_status = ParagraphStyle('TDStatus', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.HexColor("#2E7D32"), alignment=1)
+    val_title_style = ParagraphStyle('ValTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.white)
+    val_num_style = ParagraphStyle('ValNum', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#FFD700"), alignment=2)
+
+    if os.path.exists("logo.jpg"):
+        story.append(RLImage("logo.jpg", width=560, height=130))
+        story.append(Spacer(1, 10))
+    elif os.path.exists("logo.png"):
+        story.append(RLImage("logo.png", width=560, height=130))
+        story.append(Spacer(1, 10))
+
+    titulo_sec1 = "📌 ORÇAMENTO COMERCIAL E ESCOPO TÉCNICO" if tipo_documento == "ORCAMENTO" else "📌 RELATÓRIO DE CONTROLE FINANCEIRO INTERNO"
+    sec1_hdr = Table([[Paragraph(titulo_sec1, sec_title_style)]], colWidths=[560])
+    sec1_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
+    story.append(sec1_hdr)
+    
+    dados_sec1 = [
+        [Paragraph("CLIENTE / EMPRESA", th_style), Paragraph(str(registro["Cliente"]), td_bold), Paragraph("DATA DO EVENTO", th_style), Paragraph(str(registro["Data Evento"]), td_style)],
+        [Paragraph("COMPLEXO / SETOR", th_style), Paragraph(str(registro["Complexo Champions"]), td_style), Paragraph("HORÁRIO", th_style), Paragraph(str(registro["Horário"]), td_style)],
+        [Paragraph("TRANSMISSÃO TVs", th_style), Paragraph(str(registro["Transmissão TVs"]), td_style), Paragraph("OBSERVAÇÕES", th_style), Paragraph(str(registro["Observações"]), td_style)]
+    ]
+    t1 = Table(dados_sec1, colWidths=[110, 170, 110, 170])
+    t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF6EE")), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")), ('PADDING', (0,0), (-1,-1), 5)]))
+    story.append(t1)
+    story.append(Spacer(1, 10))
+
+    sec2_hdr = Table([[Paragraph("🛠️ SETOR DE ENGENHARIA DE ÁUDIO, LUZ, VÍDEO & ESTRUTURA", sec_title_style)]], colWidths=[560])
+    sec2_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
+    story.append(sec2_hdr)
+    t2 = Table([[Paragraph("ITEM / ATIVO TÉCNICO CONTRATADO", th_style), Paragraph("STATUS OPERACIONAL", th_style)], [Paragraph(str(registro["Equipamentos"]).replace('\n', '<br/>'), td_style), Paragraph("INCLUSO", td_status)]], colWidths=[440, 120])
+    t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EAE3D2")), ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#FAF6EE")), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")), ('PADDING', (0,0), (-1,-1), 6), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+    story.append(t2)
+    story.append(Spacer(1, 10))
+
+    if tipo_documento == "FINANCEIRO":
+        sec4_hdr = Table([[Paragraph("💰 BALANÇO FINANCEIRO & DIVISÃO DE LUCRO OPERACIONAL", sec_title_style)]], colWidths=[560])
+        sec4_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
+        story.append(sec4_hdr)
+        dados_sec4 = [
+            [Paragraph("Faturamento Bruto:", th_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", td_bold), Paragraph("Imposto Nota Fiscal (10%):", th_style), Paragraph(f"R$ {registro['10% NF']:,.2f}", td_style)],
+            [Paragraph("Custos Operacionais:", th_style), Paragraph(f"R$ {registro['Custos Operacionais + Logística']:,.2f}", td_style), Paragraph("Lucro Real Líquido:", th_style), Paragraph(f"R$ {registro['Lucro Real']:,.2f}", td_bold)],
+            [Paragraph("<b>PARTE MIGUEL ARAÚJO (50%)</b>", th_style), Paragraph(f"<b>R$ {registro['Lucro Miguel Araújo']:,.2f}</b>", td_bold), Paragraph("<b>PARTE ANTONIO CARLOS (50%)</b>", th_style), Paragraph(f"<b>R$ {registro['Lucro Antonio Carlos']:,.2f}</b>", td_bold)]
+        ]
+        t4 = Table(dados_sec4, colWidths=[140, 140, 140, 140])
+        t4.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF6EE")), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")), ('PADDING', (0,0), (-1,-1), 5)]))
+        story.append(t4)
+        story.append(Spacer(1, 12))
+
+    val_box = Table([[Paragraph(f"VALOR FINANCEIRO GLOBAL ({registro['Cliente']}):", val_title_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", val_num_style)]], colWidths=[360, 200])
+    val_box.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 10), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+    story.append(val_box)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+# Inicializa Banco de Dados
 init_db()
 
 # --- CONFIGURAÇÃO DA PÁGINA STREAMLIT ---
@@ -189,7 +259,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização CSS Personalizada
 st.markdown("""
     <style>
     .stApp { background-color: #1A1412; color: #FAF6EE; }
@@ -205,7 +274,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CABEÇALHO ---
+# CABEÇALHO
 col_logo, col_tit = st.columns([1.5, 3.5])
 with col_logo:
     if os.path.exists("logo.jpg"):
@@ -223,7 +292,7 @@ st.markdown("---")
 
 faturamentos = carregar_eventos()
 
-# --- PAINEL GERAL DE INDICADORES (KPIs PROTEGIDOS) ---
+# PAINEL GERAL DE INDICADORES (KPIs PROTEGIDOS)
 if faturamentos:
     df_kpi = pd.DataFrame(faturamentos)
     
@@ -255,9 +324,9 @@ if faturamentos:
 
     st.markdown("---")
 
-aba1, aba2, aba3 = st.tabs(["➕ Novo Evento / Lançamento", "✏️ Baixas & Edição Financeira", "📊 Relatórios"])
+aba1, aba2, aba3 = st.tabs(["➕ Novo Evento / Lançamento", "✏️ Baixas & Edição Financeira", "📊 Relatórios & PDFs"])
 
-# --- ABA 1: NOVO EVENTO ---
+# ABA 1: NOVO EVENTO
 with aba1:
     with st.expander("➕ Cadastrar Novo Evento e Valores", expanded=True):
         st.markdown("### 📋 1. Identificação do Evento")
@@ -307,4 +376,60 @@ with aba1:
         st.markdown("### 💳 6. Status Inicial de Caixa")
         col_st1, col_st2 = st.columns(2)
         with col_st1:
-            val_recebido_init
+            val_recebido_init = st.number_input("Quanto o cliente JÁ PAGOU? (R$)", min_value=0.0, step=100.0, key="v_rec_init")
+        with col_st2:
+            val_pago_equipe_init = st.number_input("Quanto você JÁ PAGOU à equipe? (R$)", min_value=0.0, step=100.0, key="v_pag_init")
+
+        col_d1, col_d2 = st.columns(2)
+        with col_d1: dt_pag_operacional = st.date_input("Previsão Pagamento Operacional")
+        with col_d2: dt_rec_champions = st.date_input("Previsão Recebimento Cliente")
+
+        obs_gerais = st.text_area("Observações Financeiras / Gerais")
+
+        faturamento_bruto = val_aprovado + val_extra_total
+        imposto_nf = faturamento_bruto * 0.10
+        total_custos_op = custo_resolume + custo_iluminacao + custo_sonorizacao + custo_diretor + custo_logistica
+        lucro_real = faturamento_bruto - imposto_nf - total_custos_op
+
+        status_rec = "Pago Total" if val_recebido_init >= faturamento_bruto and faturamento_bruto > 0 else ("Parcial" if val_recebido_init > 0 else "Pendente")
+        status_pag = "Pago Total" if val_pago_equipe_init >= total_custos_op and total_custos_op > 0 else ("Parcial" if val_pago_equipe_init > 0 else "Pendente")
+
+        st.markdown("---")
+        if st.button("💾 Gravar Evento no Controle Financeiro", use_container_width=True):
+            novo_registro = {
+                "Cliente": cliente, "Data Evento": data_evento.strftime("%d/%m/%Y"), "Horário": horario,
+                "Complexo Champions": local_str, "Transmissão TVs": transmissao, "Aprovado": val_aprovado,
+                "Val. Extra": val_extra_total, "Itens Extras": df_extras_edit.to_dict('records') if not df_extras_edit.empty else [],
+                "Faturamento Bruto": faturamento_bruto, "10% NF": imposto_nf, "Custos Operacionais + Logística": total_custos_op,
+                "Custo Resolume": custo_resolume, "Custo Iluminação": custo_iluminacao, "Custo Sonorização": custo_sonorizacao,
+                "Custo Diretor": custo_diretor, "Custo Logística": custo_logistica,
+                "Valor Recebido Cliente": val_recebido_init, "Valor Pago Equipe": val_pago_equipe_init,
+                "Status Recebimento": status_rec, "Status Pagamento": status_pag,
+                "Lucro Real": lucro_real, "Lucro Miguel Araújo": lucro_real * 0.50, "Lucro Antonio Carlos": lucro_real * 0.50,
+                "Pag. Operacional": dt_pag_operacional.strftime("%d/%m/%Y"), "Rec. Champions": dt_rec_champions.strftime("%d/%m/%Y"),
+                "Equipamentos": equipamentos_contrato if equipamentos_contrato else "Não especificado",
+                "Equipe Técnica": equipe_tecnica if equipe_tecnica else "Não especificado",
+                "Observações": obs_gerais if obs_gerais else "Nenhuma observação."
+            }
+            salvar_evento_db(novo_registro)
+            st.success("✅ Evento cadastrado com sucesso!")
+            st.rerun()
+
+# ABA 2: EDITAR E DAR BAIXA
+with aba2:
+    st.subheader("✏️ Dar Baixa em Recebimentos e Pagamentos")
+    if not faturamentos:
+        st.info("Nenhum evento registrado no banco de dados.")
+    else:
+        idx_edit = st.selectbox(
+            "Selecione o Evento:", range(len(faturamentos)),
+            format_func=lambda x: f"ID #{faturamentos[x]['id']} - {faturamentos[x]['Cliente']} ({faturamentos[x]['Data Evento']})"
+        )
+        
+        reg = faturamentos[idx_edit]
+        
+        with st.form("form_baixa_financeira"):
+            st.markdown(f"### 📍 Evento: **{reg['Cliente']}** ({reg['Data Evento']})")
+            
+            c_rec1, c_rec2, c_rec3 = st.columns(3)
+            with c_rec1
