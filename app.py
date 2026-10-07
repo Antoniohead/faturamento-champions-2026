@@ -214,7 +214,7 @@ def deletar_evento_db(id_evento):
     conn.commit()
     conn.close()
 
-# GERADOR DE PDF DUAL
+# GERADOR DE PDF DUAL COM VALOR BASE E EXTRAS DETALHADOS NO ORÇAMENTO
 def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
@@ -229,6 +229,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     val_title_style = ParagraphStyle('ValTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.white)
     val_num_style = ParagraphStyle('ValNum', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#FFD700"), alignment=2)
 
+    # Logótipo
     if os.path.exists("logo.jpg"):
         story.append(RLImage("logo.jpg", width=560, height=130))
         story.append(Spacer(1, 10))
@@ -236,7 +237,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(RLImage("logo.png", width=560, height=130))
         story.append(Spacer(1, 10))
 
-    # 1. Identificação
+    # 1. Identificação do Evento
     titulo_sec1 = "📌 ORÇAMENTO COMERCIAL E ESCOPO TÉCNICO" if tipo_documento == "ORCAMENTO" else "📌 RELATÓRIO DE CONTROLE FINANCEIRO INTERNO"
     sec1_hdr = Table([[Paragraph(titulo_sec1, sec_title_style)]], colWidths=[560])
     sec1_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
@@ -261,31 +262,71 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     story.append(t2)
     story.append(Spacer(1, 10))
 
-    # 3. ITENS EXTRAS
+    # 3. RESUMO FINANCEIRO DO ORÇAMENTO (VALOR BASE + ADICIONAIS EXTRAS)
+    val_base = float(registro.get("Aprovado", 0.0))
+    val_extra_tot = float(registro.get("Val. Extra", 0.0))
     itens_extras = registro.get("Itens Extras", [])
-    if itens_extras and len(itens_extras) > 0:
-        sec_ext_hdr = Table([[Paragraph("➕ ITENS E SERVIÇOS ADICIONAIS (EXTRAS)", sec_title_style)]], colWidths=[560])
-        sec_ext_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
-        story.append(sec_ext_hdr)
 
-        dados_extras = [[Paragraph("DESCRIÇÃO DO ITEM EXTRA", th_style), Paragraph("VALOR (R$)", th_style)]]
-        for item in itens_extras:
-            desc = item.get("Descrição") or item.get("Descricao") or "Item Extra"
-            val = float(item.get("Valor", 0.0))
-            dados_extras.append([Paragraph(str(desc), td_style), Paragraph(f"R$ {val:,.2f}", td_bold)])
+    if tipo_documento == "ORCAMENTO":
+        sec_or_hdr = Table([[Paragraph("💵 RESUMO DE VALORES (ESCOPO BASE + ADICIONAIS)", sec_title_style)]], colWidths=[560])
+        sec_or_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
+        story.append(sec_or_hdr)
 
-        t_extras = Table(dados_extras, colWidths=[420, 140])
-        t_extras.setStyle(TableStyle([
+        dados_orc_resumo = [
+            [Paragraph("ESCOPO BASE APROVADO", th_style), Paragraph("STATUS / DESCRIÇÃO", th_style), Paragraph("VALOR BASE (R$)", th_style)],
+            [Paragraph("Estrutura, Equipamentos e Equipe Base", td_style), Paragraph("Pacote Padrão Aprovado", td_style), Paragraph(f"R$ {val_base:,.2f}", td_bold)]
+        ]
+
+        if itens_extras and len(itens_extras) > 0:
+            for item in itens_extras:
+                desc = item.get("Descrição") or item.get("Descricao") or "Item Extra"
+                val = float(item.get("Valor", 0.0))
+                dados_orc_resumo.append([
+                    Paragraph(f"➕ Extra: {desc}", td_style),
+                    Paragraph("Item Solicitado Adicionalmente", td_style),
+                    Paragraph(f"R$ {val:,.2f}", td_bold)
+                ])
+
+            dados_orc_resumo.append([
+                Paragraph("<b>SUBTOTAL DE ADICIONAIS / EXTRAS</b>", th_style),
+                Paragraph("", th_style),
+                Paragraph(f"<b>R$ {val_extra_tot:,.2f}</b>", td_bold)
+            ])
+
+        t_orc_resumo = Table(dados_orc_resumo, colWidths=[240, 180, 140])
+        t_orc_resumo.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EAE3D2")),
             ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#FAF6EE")),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")),
-            ('PADDING', (0,0), (-1,-1), 5), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+            ('PADDING', (0,0), (-1,-1), 5),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
         ]))
-        story.append(t_extras)
+        story.append(t_orc_resumo)
         story.append(Spacer(1, 10))
 
-    # 4. Balanço Financeiro Interno
+    # 4. Balanço Financeiro Interno e Fornecedores (Apenas no PDF de Controle Financeiro)
     if tipo_documento == "FINANCEIRO":
+        if itens_extras and len(itens_extras) > 0:
+            sec_ext_hdr = Table([[Paragraph("➕ ITENS E SERVIÇOS ADICIONAIS (EXTRAS)", sec_title_style)]], colWidths=[560])
+            sec_ext_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
+            story.append(sec_ext_hdr)
+
+            dados_extras = [[Paragraph("DESCRIÇÃO DO ITEM EXTRA", th_style), Paragraph("VALOR (R$)", th_style)]]
+            for item in itens_extras:
+                desc = item.get("Descrição") or item.get("Descricao") or "Item Extra"
+                val = float(item.get("Valor", 0.0))
+                dados_extras.append([Paragraph(str(desc), td_style), Paragraph(f"R$ {val:,.2f}", td_bold)])
+
+            t_extras = Table(dados_extras, colWidths=[420, 140])
+            t_extras.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EAE3D2")),
+                ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#FAF6EE")),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")),
+                ('PADDING', (0,0), (-1,-1), 5), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+            ]))
+            story.append(t_extras)
+            story.append(Spacer(1, 10))
+
         fornecedores_list = registro.get("Fornecedores Externos", [])
         if fornecedores_list:
             sec_forn_hdr = Table([[Paragraph("🌐 FORNECEDORES EXTERNOS CONTRATADOS", sec_title_style)]], colWidths=[560])
@@ -334,7 +375,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
 # Inicializa Banco de Dados
 init_db()
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
+# --- CONFIGURAÇÃO DA PÁGINA STREAMLIT ---
 st.set_page_config(
     page_title="Miguel Araújo Produções - Gestão Financeira Unificada",
     page_icon="💰",
@@ -445,7 +486,7 @@ with aba1:
         with col_v2:
             fat_bruto_temp = val_aprovado + val_extra_total
             imp_temp = fat_bruto_temp * 0.10
-            st.success(f"**Faturamento Bruto:** R$ {fat_bruto_temp:,.2f}\n• Imposto (10% NF): R$ {imp_temp:,.2f}")
+            st.success(f"**Faturamento Bruto Total:** R$ {fat_bruto_temp:,.2f}\n• Base: R$ {val_aprovado:,.2f} | Extras: R$ {val_extra_total:,.2f}\n• Imposto (10% NF): R$ {imp_temp:,.2f}")
 
         st.markdown("### 👥 5. Custos: Equipe Técnica, Logística & Fornecedores")
         col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns(5)
@@ -534,8 +575,6 @@ with aba2:
             ce_col1, ce_col2, ce_col3 = st.columns(3)
             with ce_col1:
                 e_cliente = st.text_input("Cliente / Empresa", value=reg["Cliente"])
-                
-                # Conversão da data para objeto date
                 try:
                     dt_parsed = datetime.strptime(reg["Data Evento"], "%d/%m/%Y").date()
                 except Exception:
@@ -546,7 +585,6 @@ with aba2:
             with ce_col2:
                 locais_atuais = [loc.strip() for loc in reg["Complexo Champions"].split(",") if loc.strip()]
                 opcoes_locais = ["Arena", "Sala Glass", "Rooftop Maior", "Rooftop Menor"]
-                # Mantém locais customizados caso existam
                 for loc in locais_atuais:
                     if loc and loc not in opcoes_locais:
                         opcoes_locais.append(loc)
@@ -579,7 +617,8 @@ with aba2:
             with col_ev1:
                 e_val_aprovado = st.number_input("Valor Base Aprovado (R$)", value=float(reg["Aprovado"]), min_value=0.0, step=100.0)
             with col_ev2:
-                st.info(f"Faturamento Bruto Calculado: **R$ {(e_val_aprovado + e_val_extra_total):,.2f}**")
+                fat_total_calc = e_val_aprovado + e_val_extra_total
+                st.info(f"Faturamento Bruto Total: **R$ {fat_total_calc:,.2f}** (Base: R$ {e_val_aprovado:,.2f} + Extras: R$ {e_val_extra_total:,.2f})")
 
             st.markdown("#### 👥 5. Custos: Equipe Técnica, Logística & Cachês")
             col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
@@ -706,7 +745,7 @@ with aba3:
 
         st.dataframe(
             df_full[[
-                "id", "Cliente", "Data Evento", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
+                "id", "Cliente", "Data Evento", "Aprovado", "Val. Extra", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
                 "Custos Operacionais + Logística", "Desc. Fornecedor Externo", "Custo Fornecedor Externo", "Valor Pago Equipe", "Falta Pagar (Equipe/Ext)", "Lucro Real",
                 "Lucro Miguel Araújo", "Lucro Antonio Carlos"
             ]],
