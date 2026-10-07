@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+import os
 
 # Configuração da página
 st.set_page_config(
@@ -60,14 +61,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- CABEÇALHO DA APLICAÇÃO ---
-col_logo, col_tit = st.columns([1, 4])
+col_logo, col_tit = st.columns([1.5, 3.5])
+
 with col_logo:
-    st.markdown("""
-        <div style="background-color: #2A201C; padding: 15px; border-radius: 10px; border: 2px solid #C5A059; text-align: center;">
-            <h2 style="color: #C5A059; margin: 0; font-weight: 900; letter-spacing: 3px;">MGL</h2>
-            <span style="color: #00E676; font-size: 11px; font-weight: bold; letter-spacing: 1px;">MIGUEL ARAÚJO<br>PRODUÇÕES</span>
-        </div>
-    """, unsafe_allow_html=True)
+    # Exibe a imagem salva no repositório (logo.jpg ou logo.png)
+    if os.path.exists("logo.jpg"):
+        st.image("logo.jpg", use_container_width=True)
+    elif os.path.exists("logo.png"):
+        st.image("logo.png", use_container_width=True)
+    else:
+        st.markdown("""
+            <div style="background-color: #2A201C; padding: 15px; border-radius: 10px; border: 2px solid #C5A059; text-align: center;">
+                <h2 style="color: #C5A059; margin: 0; font-weight: 900; letter-spacing: 3px;">MGL</h2>
+                <span style="color: #00E676; font-size: 11px; font-weight: bold; letter-spacing: 1px;">MIGUEL ARAÚJO<br>PRODUÇÕES</span>
+            </div>
+        """, unsafe_allow_html=True)
 
 with col_tit:
     st.title("MIGUEL ARAÚJO PRODUÇÕES")
