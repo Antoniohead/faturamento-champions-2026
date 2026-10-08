@@ -6,6 +6,8 @@ import io
 import sqlite3
 import json
 import urllib.parse
+import shutil
+import glob
 
 # ReportLab para geração de PDFs
 from reportlab.lib.pagesizes import letter
@@ -90,6 +92,26 @@ def init_db():
             
     conn.commit()
     conn.close()
+
+# --- FUNÇÃO DE BACKUP AUTOMÁTICO DO BANCO DE DADOS ---
+def backup_automatico():
+    """Gera uma cópia de segurança do banco eventos.db na pasta 'backups'."""
+    try:
+        if not os.path.exists(DB_NAME):
+            return
+        
+        pasta_backups = "backups"
+        if not os.path.exists(pasta_backups):
+            os.makedirs(pasta_backups)
+            
+        data_hora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        destino_timestamp = os.path.join(pasta_backups, f"eventos_backup_{data_hora}.db")
+        shutil.copy2(DB_NAME, destino_timestamp)
+        
+        destino_latest = os.path.join(pasta_backups, "eventos_latest.db")
+        shutil.copy2(DB_NAME, destino_latest)
+    except Exception as e:
+        print(f"Erro ao gerar backup automático: {e}")
 
 def parse_json_safely(val):
     if not val:
@@ -197,6 +219,7 @@ def salvar_evento_db(reg):
     ))
     conn.commit()
     conn.close()
+    backup_automatico()
 
 def atualizar_evento_db(id_evento, reg):
     conn = sqlite3.connect(DB_NAME)
@@ -222,6 +245,7 @@ def atualizar_evento_db(id_evento, reg):
     ))
     conn.commit()
     conn.close()
+    backup_automatico()
 
 def deletar_evento_db(id_evento):
     conn = sqlite3.connect(DB_NAME)
@@ -229,6 +253,7 @@ def deletar_evento_db(id_evento):
     c.execute('DELETE FROM eventos WHERE id=?', (id_evento,))
     conn.commit()
     conn.close()
+    backup_automatico()
 
 def gerar_excel_backup(eventos):
     df_export = pd.DataFrame(eventos)
@@ -1048,7 +1073,7 @@ Permanecemos à disposição!
             wsp_link = f"https://api.whatsapp.com/send?phone=55{num_clean}&text={msg_encoded}"
             st.markdown(f'<a href="{wsp_link}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366; color:white; font-weight:bold; padding:10px 20px; border:none; border-radius:8px; cursor:pointer; width:100%;">💬 Abrir no WhatsApp Web</button></a>', unsafe_allow_html=True)
 
-# ABA 7: TABELA DETALHADA, RELATÓRIOS E BACKUPS EXCEL
+# ABA 7: TABELA DETALHADA, RELATÓRIOS, BACKUPS E RESTAURAÇÃO
 with aba7:
     st.subheader("📄 Emissão de Documentos e PDFs de Orçamento")
     if faturamentos:
@@ -1070,27 +1095,59 @@ with aba7:
             st.download_button("📊 Baixar CONTROLE (Interno)", data=pdf_financeiro, file_name=f"Controle_{reg_sel['Cliente']}.pdf", mime="application/pdf", use_container_width=True)
 
         st.markdown("---")
-        st.subheader("💾 Backup de Dados em Excel / CSV")
-        col_bkp1, col_bkp2 = st.columns(2)
-        with col_bkp1:
+        st.subheader("💾 Backup de Dados e Segurança do Sistema")
+        
+        col_bkp_db, col_rest_db = st.columns(2)
+        
+        with col_bkp_db:
+            st.markdown("#### 📥 Download do Banco de Dados (.db)")
+            if os.path.exists(DB_NAME):
+                with open(DB_NAME, "rb") as fp_db:
+                    st.download_button(
+                        "📥 Baixar Arquivo de Banco de Dados (.db)",
+                        data=fp_db,
+                        file_name=f"eventos_backup_{datetime.now().strftime('%d_%m_%Y_%H%M')}.db",
+                        mime="application/x-sqlite3",
+                        use_container_width=True
+                    )
+            
             excel_bytes = gerar_excel_backup(faturamentos)
             st.download_button(
-                "📥 Baixar Backup Completo em Excel (.xlsx)",
+                "📊 Baixar Backup Completo em Excel (.xlsx)",
                 data=excel_bytes,
                 file_name=f"Backup_Eventos_Financeiro_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
-        with col_bkp2:
-            df_csv = pd.DataFrame(faturamentos)
-            csv_data = df_csv.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📄 Baixar Backup em CSV",
-                data=csv_data,
-                file_name=f"Backup_Eventos_{datetime.now().strftime('%d_%m_%Y')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+
+        with col_rest_db:
+            st.markdown("#### 📂 Restaurar Backup de Banco de Dados")
+            uploaded_db = st.file_uploader("Selecione um arquivo .db de backup:", type=["db"])
+            if uploaded_db is not None:
+                if st.button("⚠️ Restaurar e Substituir Banco Atual", use_container_width=True):
+                    with open(DB_NAME, "wb") as f_out:
+                        f_out.write(uploaded_db.getbuffer())
+                    st.success("✅ Banco de dados restaurado com sucesso!")
+                    st.rerun()
+
+        st.markdown("---")
+        st.markdown("#### 📜 Histórico de Backups Automáticos em Disco")
+        if os.path.exists("backups"):
+            ficheiros_backup = sorted(glob.glob("backups/eventos_backup_*.db"), reverse=True)
+            if ficheiros_backup:
+                st.caption(f"Existem **{len(ficheiros_backup)}** cópias de segurança armazenadas na pasta local.")
+                backup_sel = st.selectbox("Selecione uma versão do histórico para baixar:", ficheiros_backup)
+                if backup_sel:
+                    with open(backup_sel, "rb") as f_h:
+                        st.download_button(
+                            label=f"Baixar {os.path.basename(backup_sel)}",
+                            data=f_h,
+                            file_name=os.path.basename(backup_sel),
+                            mime="application/x-sqlite3",
+                            use_container_width=True
+                        )
+            else:
+                st.info("Nenhum backup automático antigo encontrado na pasta.")
 
         st.markdown("---")
         st.subheader("📋 Relatório Geral Financeiro Consolidado")
