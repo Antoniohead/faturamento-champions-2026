@@ -3,11 +3,9 @@ import pandas as pd
 from datetime import datetime
 import os
 import io
-import sqlite3
 import json
 import urllib.parse
-import shutil
-import glob
+from supabase import create_client, Client
 
 # ReportLab para geração de PDFs
 from reportlab.lib.pagesizes import letter
@@ -15,107 +13,24 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# --- CONFIGURAÇÃO E PERSISTÊNCIA VIA SQLITE ---
-DB_NAME = "eventos.db"
+# --- CONFIGURAÇÃO E PERSISTÊNCIA VIA SUPABASE ---
+@st.cache_resource
+def init_supabase() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS eventos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente TEXT,
-            data_evento TEXT,
-            horario TEXT,
-            data_montagem TEXT DEFAULT '',
-            horario_montagem TEXT DEFAULT '',
-            complexo TEXT,
-            aprovado REAL DEFAULT 0,
-            val_extra REAL DEFAULT 0,
-            itens_extras TEXT DEFAULT '[]',
-            faturamento_bruto REAL DEFAULT 0,
-            imposto_nf REAL DEFAULT 0,
-            responsavel_imposto TEXT DEFAULT 'Incluso no Valor',
-            custos_total REAL DEFAULT 0,
-            custo_resolume REAL DEFAULT 0,
-            custo_iluminacao REAL DEFAULT 0,
-            custo_sonorizacao REAL DEFAULT 0,
-            custo_diretor REAL DEFAULT 0,
-            custo_logistica REAL DEFAULT 0,
-            custo_fornecedor_externo REAL DEFAULT 0,
-            desc_fornecedor_externo TEXT DEFAULT '',
-            fornecedores_externos TEXT DEFAULT '[]',
-            reembolsos TEXT DEFAULT '[]',
-            custo_reembolsos REAL DEFAULT 0,
-            val_recebido_cliente REAL DEFAULT 0,
-            val_pago_equipe REAL DEFAULT 0,
-            status_recebimento TEXT,
-            status_pagamento TEXT,
-            lucro_real REAL DEFAULT 0,
-            lucro_miguel REAL DEFAULT 0,
-            lucro_antonio REAL DEFAULT 0,
-            pag_operacional TEXT,
-            rec_champions TEXT,
-            equipamentos TEXT,
-            equipe_tecnica TEXT,
-            observacoes TEXT
-        )
-    ''')
-    conn.commit()
-    
-    colunas_necessarias = {
-        "data_montagem": "TEXT DEFAULT ''",
-        "horario_montagem": "TEXT DEFAULT ''",
-        "responsavel_imposto": "TEXT DEFAULT 'Incluso no Valor'",
-        "reembolsos": "TEXT DEFAULT '[]'",
-        "custo_reembolsos": "REAL DEFAULT 0",
-        "val_recebido_cliente": "REAL DEFAULT 0",
-        "val_pago_equipe": "REAL DEFAULT 0",
-        "status_recebimento": "TEXT DEFAULT 'Pendente'",
-        "status_pagamento": "TEXT DEFAULT 'Pendente'",
-        "lucro_real": "REAL DEFAULT 0",
-        "lucro_miguel": "REAL DEFAULT 0",
-        "lucro_antonio": "REAL DEFAULT 0",
-        "custo_fornecedor_externo": "REAL DEFAULT 0",
-        "desc_fornecedor_externo": "TEXT DEFAULT ''",
-        "fornecedores_externos": "TEXT DEFAULT '[]'",
-        "itens_extras": "TEXT DEFAULT '[]'"
-    }
-    
-    c.execute("PRAGMA table_info(eventos)")
-    colunas_existentes = [info[1] for info in c.fetchall()]
-    
-    for col, tipo in colunas_necessarias.items():
-        if col not in colunas_existentes:
-            c.execute(f"ALTER TABLE eventos ADD COLUMN {col} {tipo}")
-            
-    conn.commit()
-    conn.close()
-
-# --- FUNÇÃO DE BACKUP AUTOMÁTICO DO BANCO DE DADOS ---
-def backup_automatico():
-    """Gera uma cópia de segurança do banco eventos.db na pasta 'backups'."""
-    try:
-        if not os.path.exists(DB_NAME):
-            return
-        
-        pasta_backups = "backups"
-        if not os.path.exists(pasta_backups):
-            os.makedirs(pasta_backups)
-            
-        data_hora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        destino_timestamp = os.path.join(pasta_backups, f"eventos_backup_{data_hora}.db")
-        shutil.copy2(DB_NAME, destino_timestamp)
-        
-        destino_latest = os.path.join(pasta_backups, "eventos_latest.db")
-        shutil.copy2(DB_NAME, destino_latest)
-    except Exception as e:
-        print(f"Erro ao gerar backup automático: {e}")
+try:
+    supabase = init_supabase()
+except Exception as e:
+    st.error("⚠️ Erro de conexão com o Supabase. Verifique se configurou as chaves nos Secrets do Streamlit Cloud.")
+    st.stop()
 
 def parse_json_safely(val):
     if not val:
         return []
+    if isinstance(val, list):
+        return val
     try:
         data = json.loads(val)
         return data if isinstance(data, list) else []
@@ -123,17 +38,15 @@ def parse_json_safely(val):
         return []
 
 def carregar_eventos():
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute('SELECT * FROM eventos ORDER BY id DESC')
-    rows = c.fetchall()
-    conn.close()
-    
+    try:
+        response = supabase.table("eventos").select("*").order("id", desc=True).execute()
+        rows = response.data or []
+    except Exception as e:
+        st.error(f"Erro ao carregar dados do Supabase: {e}")
+        rows = []
+
     eventos = []
-    for row in rows:
-        d = dict(row)
-        
+    for d in rows:
         def to_float(val):
             try:
                 return float(val) if val is not None else 0.0
@@ -178,7 +91,7 @@ def carregar_eventos():
             "Custo Logística": to_float(d.get("custo_logistica")),
             "Fornecedores Externos": forn_ext_list,
             "Custo Fornecedor Externo": custo_forn_total,
-            "Desc. Fornecedor Externo": ", ".join([f.get("Descrição", "") for f in forn_ext_list]),
+            "Desc. Fornecedor Externo": ", ".join([str(f.get("Descrição", "")) for f in forn_ext_list]),
             "Reembolsos": reembolsos_list,
             "Custo Reembolsos": custo_reembolsos_total,
             "Valor Recebido Cliente": to_float(d.get("val_recebido_cliente")),
@@ -197,63 +110,87 @@ def carregar_eventos():
     return eventos
 
 def salvar_evento_db(reg):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO eventos (
-            cliente, data_evento, horario, data_montagem, horario_montagem, complexo, aprovado, val_extra, itens_extras,
-            faturamento_bruto, imposto_nf, responsavel_imposto, custos_total, custo_resolume, custo_iluminacao, custo_sonorizacao,
-            custo_diretor, custo_logistica, custo_fornecedor_externo, desc_fornecedor_externo, fornecedores_externos,
-            reembolsos, custo_reembolsos, val_recebido_cliente, val_pago_equipe, status_recebimento, status_pagamento,
-            lucro_real, lucro_miguel, lucro_antonio, pag_operacional, rec_champions, equipamentos, equipe_tecnica, observacoes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        reg["Cliente"], reg["Data Evento"], reg["Horário"], reg["Data Montagem"], reg["Horário Montagem"], reg["Complexo / Local"],
-        reg["Aprovado"], reg["Val. Extra"], json.dumps(reg["Itens Extras"]), reg["Faturamento Bruto"],
-        reg["10% NF"], reg["Responsável Imposto"], reg["Custos Operacionais + Logística"], reg["Custo Resolume"], reg["Custo Iluminação"],
-        reg["Custo Sonorização"], reg["Custo Diretor"], reg["Custo Logística"], reg["Custo Fornecedor Externo"],
-        reg["Desc. Fornecedor Externo"], json.dumps(reg["Fornecedores Externos"]), json.dumps(reg["Reembolsos"]), reg["Custo Reembolsos"],
-        reg["Valor Recebido Cliente"], reg["Valor Pago Equipe"], reg["Status Recebimento"], reg["Status Pagamento"], reg["Lucro Real"],
-        reg["Lucro Miguel Araújo"], reg["Lucro Antonio Carlos"], reg["Pag. Operacional"], reg["Rec. Champions"],
-        reg["Equipamentos"], reg["Equipe Técnica"], reg["Observações"]
-    ))
-    conn.commit()
-    conn.close()
-    backup_automatico()
+    payload = {
+        "cliente": reg["Cliente"],
+        "data_evento": reg["Data Evento"],
+        "horario": reg["Horário"],
+        "data_montagem": reg["Data Montagem"],
+        "horario_montagem": reg["Horário Montagem"],
+        "complexo": reg["Complexo / Local"],
+        "aprovado": reg["Aprovado"],
+        "val_extra": reg["Val. Extra"],
+        "itens_extras": reg["Itens Extras"],
+        "faturamento_bruto": reg["Faturamento Bruto"],
+        "imposto_nf": reg["10% NF"],
+        "responsavel_imposto": reg["Responsável Imposto"],
+        "custos_total": reg["Custos Operacionais + Logística"],
+        "custo_resolume": reg["Custo Resolume"],
+        "custo_iluminacao": reg["Custo Iluminação"],
+        "custo_sonorizacao": reg["Custo Sonorização"],
+        "custo_diretor": reg["Custo Diretor"],
+        "custo_logistica": reg["Custo Logística"],
+        "custo_fornecedor_externo": reg["Custo Fornecedor Externo"],
+        "desc_fornecedor_externo": reg["Desc. Fornecedor Externo"],
+        "fornecedores_externos": reg["Fornecedores Externos"],
+        "reembolsos": reg["Reembolsos"],
+        "custo_reembolsos": reg["Custo Reembolsos"],
+        "val_recebido_cliente": reg["Valor Recebido Cliente"],
+        "val_pago_equipe": reg["Valor Pago Equipe"],
+        "status_recebimento": reg["Status Recebimento"],
+        "status_pagamento": reg["Status Pagamento"],
+        "lucro_real": reg["Lucro Real"],
+        "lucro_miguel": reg["Lucro Miguel Araújo"],
+        "lucro_antonio": reg["Lucro Antonio Carlos"],
+        "pag_operacional": reg["Pag. Operacional"],
+        "rec_champions": reg["Rec. Champions"],
+        "equipamentos": reg["Equipamentos"],
+        "equipe_tecnica": reg["Equipe Técnica"],
+        "observacoes": reg["Observações"]
+    }
+    supabase.table("eventos").insert(payload).execute()
 
 def atualizar_evento_db(id_evento, reg):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''
-        UPDATE eventos SET
-            cliente=?, data_evento=?, horario=?, data_montagem=?, horario_montagem=?, complexo=?, aprovado=?, val_extra=?,
-            itens_extras=?, faturamento_bruto=?, imposto_nf=?, responsavel_imposto=?, custos_total=?, custo_resolume=?,
-            custo_iluminacao=?, custo_sonorizacao=?, custo_diretor=?, custo_logistica=?, custo_fornecedor_externo=?,
-            desc_fornecedor_externo=?, fornecedores_externos=?, reembolsos=?, custo_reembolsos=?, val_recebido_cliente=?, val_pago_equipe=?,
-            status_recebimento=?, status_pagamento=?, lucro_real=?, lucro_miguel=?, lucro_antonio=?,
-            pag_operacional=?, rec_champions=?, equipamentos=?, equipe_tecnica=?, observacoes=?
-        WHERE id=?
-    ''', (
-        reg["Cliente"], reg["Data Evento"], reg["Horário"], reg["Data Montagem"], reg["Horário Montagem"], reg["Complexo / Local"],
-        reg["Aprovado"], reg["Val. Extra"], json.dumps(reg["Itens Extras"]), reg["Faturamento Bruto"],
-        reg["10% NF"], reg["Responsável Imposto"], reg["Custos Operacionais + Logística"], reg["Custo Resolume"], reg["Custo Iluminação"],
-        reg["Custo Sonorização"], reg["Custo Diretor"], reg["Custo Logística"], reg["Custo Fornecedor Externo"],
-        reg["Desc. Fornecedor Externo"], json.dumps(reg["Fornecedores Externos"]), json.dumps(reg["Reembolsos"]), reg["Custo Reembolsos"],
-        reg["Valor Recebido Cliente"], reg["Valor Pago Equipe"], reg["Status Recebimento"], reg["Status Pagamento"], reg["Lucro Real"],
-        reg["Lucro Miguel Araújo"], reg["Lucro Antonio Carlos"], reg["Pag. Operacional"], reg["Rec. Champions"],
-        reg["Equipamentos"], reg["Equipe Técnica"], reg["Observações"], id_evento
-    ))
-    conn.commit()
-    conn.close()
-    backup_automatico()
+    payload = {
+        "cliente": reg["Cliente"],
+        "data_evento": reg["Data Evento"],
+        "horario": reg["Horário"],
+        "data_montagem": reg["Data Montagem"],
+        "horario_montagem": reg["Horário Montagem"],
+        "complexo": reg["Complexo / Local"],
+        "aprovado": reg["Aprovado"],
+        "val_extra": reg["Val. Extra"],
+        "itens_extras": reg["Itens Extras"],
+        "faturamento_bruto": reg["Faturamento Bruto"],
+        "imposto_nf": reg["10% NF"],
+        "responsavel_imposto": reg["Responsável Imposto"],
+        "custos_total": reg["Custos Operacionais + Logística"],
+        "custo_resolume": reg["Custo Resolume"],
+        "custo_iluminacao": reg["Custo Iluminação"],
+        "custo_sonorizacao": reg["Custo Sonorização"],
+        "custo_diretor": reg["Custo Diretor"],
+        "custo_logistica": reg["Custo Logística"],
+        "custo_fornecedor_externo": reg["Custo Fornecedor Externo"],
+        "desc_fornecedor_externo": reg["Desc. Fornecedor Externo"],
+        "fornecedores_externos": reg["Fornecedores Externos"],
+        "reembolsos": reg["Reembolsos"],
+        "custo_reembolsos": reg["Custo Reembolsos"],
+        "val_recebido_cliente": reg["Valor Recebido Cliente"],
+        "val_pago_equipe": reg["Valor Pago Equipe"],
+        "status_recebimento": reg["Status Recebimento"],
+        "status_pagamento": reg["Status Pagamento"],
+        "lucro_real": reg["Lucro Real"],
+        "lucro_miguel": reg["Lucro Miguel Araújo"],
+        "lucro_antonio": reg["Lucro Antonio Carlos"],
+        "pag_operacional": reg["Pag. Operacional"],
+        "rec_champions": reg["Rec. Champions"],
+        "equipamentos": reg["Equipamentos"],
+        "equipe_tecnica": reg["Equipe Técnica"],
+        "observacoes": reg["Observações"]
+    }
+    supabase.table("eventos").update(payload).eq("id", id_evento).execute()
 
 def deletar_evento_db(id_evento):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('DELETE FROM eventos WHERE id=?', (id_evento,))
-    conn.commit()
-    conn.close()
-    backup_automatico()
+    supabase.table("eventos").delete().eq("id", id_evento).execute()
 
 def gerar_excel_backup(eventos):
     df_export = pd.DataFrame(eventos)
@@ -279,7 +216,6 @@ def gerar_pdf_recibo(favorecido, valor, servico_desc, cliente, data_evento):
     
     title_style = ParagraphStyle('RTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=16, textColor=colors.HexColor("#2A201C"), alignment=1)
     body_style = ParagraphStyle('RBody', parent=styles['Normal'], fontName='Helvetica', fontSize=10, textColor=colors.HexColor("#1A1412"), leading=14)
-    bold_style = ParagraphStyle('RBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.HexColor("#1A1412"))
     
     if os.path.exists("logo.jpg"):
         story.append(RLImage("logo.jpg", width=500, height=110))
@@ -534,9 +470,6 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer.seek(0)
     return buffer
 
-# Inicializa Banco de Dados
-init_db()
-
 # --- CONFIGURAÇÃO DA PÁGINA STREAMLIT ---
 st.set_page_config(
     page_title="Miguel Araújo Produções - Gestão Financeira Unificada",
@@ -780,7 +713,7 @@ with aba1:
                 "Observações": obs_gerais if obs_gerais else "Nenhuma observação."
             }
             salvar_evento_db(novo_registro)
-            st.success("✅ Evento cadastrado com sucesso!")
+            st.success("✅ Evento cadastrado com sucesso no Supabase!")
             st.rerun()
 
 # ABA 2: EDITAR COMPLETO, REEMBOLSOS E BAIXAS
@@ -910,7 +843,7 @@ with aba2:
             st.markdown("---")
             col_btn1, col_btn2 = st.columns([3, 1])
             with col_btn1:
-                btn_salvar_baixa = st.form_submit_button("🔄 Salvar Alterações do Evento", use_container_width=True)
+                btn_salvar_baixa = st.form_submit_button("🔄 Salvar Alterações no Supabase", use_container_width=True)
             with col_btn2:
                 btn_excluir_eve = st.form_submit_button("❌ Excluir Evento", use_container_width=True)
 
@@ -970,12 +903,12 @@ with aba2:
                     "Observações": e_obs if e_obs else "Nenhuma observação."
                 }
                 atualizar_evento_db(reg['id'], reg_atualizado)
-                st.success("✅ Evento atualizado com sucesso!")
+                st.success("✅ Evento atualizado com sucesso no Supabase!")
                 st.rerun()
 
             if btn_excluir_eve:
                 deletar_evento_db(reg['id'])
-                st.warning("🗑️ Evento excluído!")
+                st.warning("🗑️ Evento excluído do Supabase!")
                 st.rerun()
 
 # ABA 3: CALENDÁRIO OPERACIONAL & CRONOGRAMA
@@ -1073,7 +1006,7 @@ Permanecemos à disposição!
             wsp_link = f"https://api.whatsapp.com/send?phone=55{num_clean}&text={msg_encoded}"
             st.markdown(f'<a href="{wsp_link}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366; color:white; font-weight:bold; padding:10px 20px; border:none; border-radius:8px; cursor:pointer; width:100%;">💬 Abrir no WhatsApp Web</button></a>', unsafe_allow_html=True)
 
-# ABA 7: TABELA DETALHADA, RELATÓRIOS, BACKUPS E RESTAURAÇÃO
+# ABA 7: TABELA DETALHADA, RELATÓRIOS E BACKUPS EXCEL
 with aba7:
     st.subheader("📄 Emissão de Documentos e PDFs de Orçamento")
     if faturamentos:
@@ -1095,59 +1028,27 @@ with aba7:
             st.download_button("📊 Baixar CONTROLE (Interno)", data=pdf_financeiro, file_name=f"Controle_{reg_sel['Cliente']}.pdf", mime="application/pdf", use_container_width=True)
 
         st.markdown("---")
-        st.subheader("💾 Backup de Dados e Segurança do Sistema")
-        
-        col_bkp_db, col_rest_db = st.columns(2)
-        
-        with col_bkp_db:
-            st.markdown("#### 📥 Download do Banco de Dados (.db)")
-            if os.path.exists(DB_NAME):
-                with open(DB_NAME, "rb") as fp_db:
-                    st.download_button(
-                        "📥 Baixar Arquivo de Banco de Dados (.db)",
-                        data=fp_db,
-                        file_name=f"eventos_backup_{datetime.now().strftime('%d_%m_%Y_%H%M')}.db",
-                        mime="application/x-sqlite3",
-                        use_container_width=True
-                    )
-            
+        st.subheader("💾 Backup de Dados em Excel / CSV")
+        col_bkp1, col_bkp2 = st.columns(2)
+        with col_bkp1:
             excel_bytes = gerar_excel_backup(faturamentos)
             st.download_button(
-                "📊 Baixar Backup Completo em Excel (.xlsx)",
+                "📥 Baixar Backup Completo em Excel (.xlsx)",
                 data=excel_bytes,
                 file_name=f"Backup_Eventos_Financeiro_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
-
-        with col_rest_db:
-            st.markdown("#### 📂 Restaurar Backup de Banco de Dados")
-            uploaded_db = st.file_uploader("Selecione um arquivo .db de backup:", type=["db"])
-            if uploaded_db is not None:
-                if st.button("⚠️ Restaurar e Substituir Banco Atual", use_container_width=True):
-                    with open(DB_NAME, "wb") as f_out:
-                        f_out.write(uploaded_db.getbuffer())
-                    st.success("✅ Banco de dados restaurado com sucesso!")
-                    st.rerun()
-
-        st.markdown("---")
-        st.markdown("#### 📜 Histórico de Backups Automáticos em Disco")
-        if os.path.exists("backups"):
-            ficheiros_backup = sorted(glob.glob("backups/eventos_backup_*.db"), reverse=True)
-            if ficheiros_backup:
-                st.caption(f"Existem **{len(ficheiros_backup)}** cópias de segurança armazenadas na pasta local.")
-                backup_sel = st.selectbox("Selecione uma versão do histórico para baixar:", ficheiros_backup)
-                if backup_sel:
-                    with open(backup_sel, "rb") as f_h:
-                        st.download_button(
-                            label=f"Baixar {os.path.basename(backup_sel)}",
-                            data=f_h,
-                            file_name=os.path.basename(backup_sel),
-                            mime="application/x-sqlite3",
-                            use_container_width=True
-                        )
-            else:
-                st.info("Nenhum backup automático antigo encontrado na pasta.")
+        with col_bkp2:
+            df_csv = pd.DataFrame(faturamentos)
+            csv_data = df_csv.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📄 Baixar Backup em CSV",
+                data=csv_data,
+                file_name=f"Backup_Eventos_{datetime.now().strftime('%d_%m_%Y')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
 
         st.markdown("---")
         st.subheader("📋 Relatório Geral Financeiro Consolidado")
