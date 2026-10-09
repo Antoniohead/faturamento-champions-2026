@@ -16,7 +16,7 @@ from reportlab.lib import colors
 # --- CONFIGURAÇÃO E PERSISTÊNCIA VIA SUPABASE ---
 @st.cache_resource
 def init_supabase() -> Client:
-    # Tratamento para garantir URL limpa sem barras no final
+    # Tratamento para garantir URL limpa sem barras no final ou espaços
     url = st.secrets["SUPABASE_URL"].strip().rstrip("/")
     key = st.secrets["SUPABASE_KEY"].strip()
     return create_client(url, key)
@@ -37,6 +37,12 @@ def parse_json_safely(val):
         return data if isinstance(data, list) else []
     except (json.JSONDecodeError, TypeError):
         return []
+
+def serializar_para_supabase(dados):
+    """Garante que listas/dicionários sejam válidos para colunas JSONB no Supabase."""
+    if isinstance(dados, (list, dict)):
+        return dados
+    return []
 
 def carregar_eventos():
     try:
@@ -112,81 +118,81 @@ def carregar_eventos():
 
 def salvar_evento_db(reg):
     payload = {
-        "cliente": reg["Cliente"],
-        "data_evento": reg["Data Evento"],
-        "horario": reg["Horário"],
-        "data_montagem": reg["Data Montagem"],
-        "horario_montagem": reg["Horário Montagem"],
-        "complexo": reg["Complexo / Local"],
-        "aprovado": reg["Aprovado"],
-        "val_extra": reg["Val. Extra"],
-        "itens_extras": reg["Itens Extras"],
-        "faturamento_bruto": reg["Faturamento Bruto"],
-        "imposto_nf": reg["10% NF"],
-        "responsavel_imposto": reg["Responsável Imposto"],
-        "custos_total": reg["Custos Operacionais + Logística"],
-        "custo_resolume": reg["Custo Resolume"],
-        "custo_iluminacao": reg["Custo Iluminação"],
-        "custo_sonorizacao": reg["Custo Sonorização"],
-        "custo_diretor": reg["Custo Diretor"],
-        "custo_logistica": reg["Custo Logística"],
-        "custo_fornecedor_externo": reg["Custo Fornecedor Externo"],
-        "desc_fornecedor_externo": reg["Desc. Fornecedor Externo"],
-        "fornecedores_externos": reg["Fornecedores Externos"],
-        "reembolsos": reg["Reembolsos"],
-        "custo_reembolsos": reg["Custo Reembolsos"],
-        "val_recebido_cliente": reg["Valor Recebido Cliente"],
-        "val_pago_equipe": reg["Valor Pago Equipe"],
-        "status_recebimento": reg["Status Recebimento"],
-        "status_pagamento": reg["Status Pagamento"],
-        "lucro_real": reg["Lucro Real"],
-        "lucro_miguel": reg["Lucro Miguel Araújo"],
-        "lucro_antonio": reg["Lucro Antonio Carlos"],
-        "pag_operacional": reg["Pag. Operacional"],
-        "rec_champions": reg["Rec. Champions"],
-        "equipamentos": reg["Equipamentos"],
-        "equipe_tecnica": reg["Equipe Técnica"],
-        "observacoes": reg["Observações"]
+        "cliente": str(reg.get("Cliente") or "Não informado"),
+        "data_evento": str(reg.get("Data Evento") or ""),
+        "horario": str(reg.get("Horário") or ""),
+        "data_montagem": str(reg.get("Data Montagem") or ""),
+        "horario_montagem": str(reg.get("Horário Montagem") or ""),
+        "complexo": str(reg.get("Complexo / Local") or ""),
+        "aprovado": float(reg.get("Aprovado") or 0.0),
+        "val_extra": float(reg.get("Val. Extra") or 0.0),
+        "itens_extras": serializar_para_supabase(reg.get("Itens Extras")),
+        "faturamento_bruto": float(reg.get("Faturamento Bruto") or 0.0),
+        "imposto_nf": float(reg.get("10% NF") or 0.0),
+        "responsavel_imposto": str(reg.get("Responsável Imposto") or "Incluso no Valor"),
+        "custos_total": float(reg.get("Custos Operacionais + Logística") or 0.0),
+        "custo_resolume": float(reg.get("Custo Resolume") or 0.0),
+        "custo_iluminacao": float(reg.get("Custo Iluminação") or 0.0),
+        "custo_sonorizacao": float(reg.get("Custo Sonorização") or 0.0),
+        "custo_diretor": float(reg.get("Custo Diretor") or 0.0),
+        "custo_logistica": float(reg.get("Custo Logística") or 0.0),
+        "custo_fornecedor_externo": float(reg.get("Custo Fornecedor Externo") or 0.0),
+        "desc_fornecedor_externo": str(reg.get("Desc. Fornecedor Externo") or ""),
+        "fornecedores_externos": serializar_para_supabase(reg.get("Fornecedores Externos")),
+        "reembolsos": serializar_para_supabase(reg.get("Reembolsos")),
+        "custo_reembolsos": float(reg.get("Custo Reembolsos") or 0.0),
+        "val_recebido_cliente": float(reg.get("Valor Recebido Cliente") or 0.0),
+        "val_pago_equipe": float(reg.get("Valor Pago Equipe") or 0.0),
+        "status_recebimento": str(reg.get("Status Recebimento") or "Pendente"),
+        "status_pagamento": str(reg.get("Status Pagamento") or "Pendente"),
+        "lucro_real": float(reg.get("Lucro Real") or 0.0),
+        "lucro_miguel": float(reg.get("Lucro Miguel Araújo") or 0.0),
+        "lucro_antonio": float(reg.get("Lucro Antonio Carlos") or 0.0),
+        "pag_operacional": str(reg.get("Pag. Operacional") or ""),
+        "rec_champions": str(reg.get("Rec. Champions") or ""),
+        "equipamentos": str(reg.get("Equipamentos") or ""),
+        "equipe_tecnica": str(reg.get("Equipe Técnica") or ""),
+        "observacoes": str(reg.get("Observações") or "")
     }
     supabase.table("eventos").insert(payload).execute()
 
 def atualizar_evento_db(id_evento, reg):
     payload = {
-        "cliente": reg["Cliente"],
-        "data_evento": reg["Data Evento"],
-        "horario": reg["Horário"],
-        "data_montagem": reg["Data Montagem"],
-        "horario_montagem": reg["Horário Montagem"],
-        "complexo": reg["Complexo / Local"],
-        "aprovado": reg["Aprovado"],
-        "val_extra": reg["Val. Extra"],
-        "itens_extras": reg["Itens Extras"],
-        "faturamento_bruto": reg["Faturamento Bruto"],
-        "imposto_nf": reg["10% NF"],
-        "responsavel_imposto": reg["Responsável Imposto"],
-        "custos_total": reg["Custos Operacionais + Logística"],
-        "custo_resolume": reg["Custo Resolume"],
-        "custo_iluminacao": reg["Custo Iluminação"],
-        "custo_sonorizacao": reg["Custo Sonorização"],
-        "custo_diretor": reg["Custo Diretor"],
-        "custo_logistica": reg["Custo Logística"],
-        "custo_fornecedor_externo": reg["Custo Fornecedor Externo"],
-        "desc_fornecedor_externo": reg["Desc. Fornecedor Externo"],
-        "fornecedores_externos": reg["Fornecedores Externos"],
-        "reembolsos": reg["Reembolsos"],
-        "custo_reembolsos": reg["Custo Reembolsos"],
-        "val_recebido_cliente": reg["Valor Recebido Cliente"],
-        "val_pago_equipe": reg["Valor Pago Equipe"],
-        "status_recebimento": reg["Status Recebimento"],
-        "status_pagamento": reg["Status Pagamento"],
-        "lucro_real": reg["Lucro Real"],
-        "lucro_miguel": reg["Lucro Miguel Araújo"],
-        "lucro_antonio": reg["Lucro Antonio Carlos"],
-        "pag_operacional": reg["Pag. Operacional"],
-        "rec_champions": reg["Rec. Champions"],
-        "equipamentos": reg["Equipamentos"],
-        "equipe_tecnica": reg["Equipe Técnica"],
-        "observacoes": reg["Observações"]
+        "cliente": str(reg.get("Cliente") or "Não informado"),
+        "data_evento": str(reg.get("Data Evento") or ""),
+        "horario": str(reg.get("Horário") or ""),
+        "data_montagem": str(reg.get("Data Montagem") or ""),
+        "horario_montagem": str(reg.get("Horário Montagem") or ""),
+        "complexo": str(reg.get("Complexo / Local") or ""),
+        "aprovado": float(reg.get("Aprovado") or 0.0),
+        "val_extra": float(reg.get("Val. Extra") or 0.0),
+        "itens_extras": serializar_para_supabase(reg.get("Itens Extras")),
+        "faturamento_bruto": float(reg.get("Faturamento Bruto") or 0.0),
+        "imposto_nf": float(reg.get("10% NF") or 0.0),
+        "responsavel_imposto": str(reg.get("Responsável Imposto") or "Incluso no Valor"),
+        "custos_total": float(reg.get("Custos Operacionais + Logística") or 0.0),
+        "custo_resolume": float(reg.get("Custo Resolume") or 0.0),
+        "custo_iluminacao": float(reg.get("Custo Iluminação") or 0.0),
+        "custo_sonorizacao": float(reg.get("Custo Sonorização") or 0.0),
+        "custo_diretor": float(reg.get("Custo Diretor") or 0.0),
+        "custo_logistica": float(reg.get("Custo Logística") or 0.0),
+        "custo_fornecedor_externo": float(reg.get("Custo Fornecedor Externo") or 0.0),
+        "desc_fornecedor_externo": str(reg.get("Desc. Fornecedor Externo") or ""),
+        "fornecedores_externos": serializar_para_supabase(reg.get("Fornecedores Externos")),
+        "reembolsos": serializar_para_supabase(reg.get("Reembolsos")),
+        "custo_reembolsos": float(reg.get("Custo Reembolsos") or 0.0),
+        "val_recebido_cliente": float(reg.get("Valor Recebido Cliente") or 0.0),
+        "val_pago_equipe": float(reg.get("Valor Pago Equipe") or 0.0),
+        "status_recebimento": str(reg.get("Status Recebimento") or "Pendente"),
+        "status_pagamento": str(reg.get("Status Pagamento") or "Pendente"),
+        "lucro_real": float(reg.get("Lucro Real") or 0.0),
+        "lucro_miguel": float(reg.get("Lucro Miguel Araújo") or 0.0),
+        "lucro_antonio": float(reg.get("Lucro Antonio Carlos") or 0.0),
+        "pag_operacional": str(reg.get("Pag. Operacional") or ""),
+        "rec_champions": str(reg.get("Rec. Champions") or ""),
+        "equipamentos": str(reg.get("Equipamentos") or ""),
+        "equipe_tecnica": str(reg.get("Equipe Técnica") or ""),
+        "observacoes": str(reg.get("Observações") or "")
     }
     supabase.table("eventos").update(payload).eq("id", id_evento).execute()
 
@@ -456,7 +462,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         texto_notas = """
         <b>⚠️ NOTAS DE CONVENÇÃO E CONDIÇÕES GERAIS</b><br/><br/>
         • <b>Otimização de Custos (Patrimônio do Local):</b> Em conformidade com a estratégia acordada, os custos de locação de ativos já disponíveis no estoque fixo da casa (como conversores/transmitters, receivers e mesas de som sobressalentes) foram integralmente deduzidos ou omitidos, evitando compras ou cobranças redundantes.<br/>
-        • <b>Período Operacional:</b> As diárias comerciais acima referem-se a uma jornada padrão por evento no período de 12hs. Prorrogações ou alterações de rider deverão ser notifiedas com antecedência de 48 horas.<br/>
+        • <b>Período Operacional:</b> As diárias comerciais acima referem-se a uma jornada padrão por evento no período de 12hs. Prorrogações ou alterações de rider deverão ser notificadas com antecedência de 48 horas.<br/>
         • <b>Faturamento & Compliance:</b> Pagamentos deverão ser realizados preferencialmente de forma antecipada à data dos eventos. As Notas Fiscais (NF) de prestação de serviços e locação serão emitidas no dia útil subsequente à realização de cada agenda.
         """
         t_notas = Table([[Paragraph(texto_notas, nota_text_style)]], colWidths=[560])
