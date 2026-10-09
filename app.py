@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import io
 import json
+import math
 import urllib.parse
 from supabase import create_client, Client
 
@@ -38,11 +39,35 @@ def parse_json_safely(val):
     except (json.JSONDecodeError, TypeError):
         return []
 
+def limpar_valor_json(obj):
+    """Remove NaNs, Nones e converte objetos não serializáveis em tipos válidos para JSON."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0.0
+        return obj
+    elif isinstance(obj, dict):
+        return {k: limpar_valor_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [limpar_valor_json(i) for i in obj]
+    return obj
+
 def serializar_para_jsonb(dados):
-    """Garante que dicionários e listas sejam passados corretamente para colunas JSONB no Supabase."""
+    """Garante que dicionários e listas sejam estritamente compatíveis com JSONB no Supabase."""
+    if isinstance(dados, pd.DataFrame):
+        dados = dados.to_dict('records')
     if isinstance(dados, (list, dict)):
-        return dados
+        return limpar_valor_json(dados)
     return []
+
+def safe_float(val):
+    """Garante conversão segura para float sem retornar NaN ou Inf."""
+    try:
+        f = float(val)
+        if math.isnan(f) or math.isinf(f):
+            return 0.0
+        return f
+    except (ValueError, TypeError):
+        return 0.0
 
 def carregar_eventos():
     try:
@@ -54,27 +79,21 @@ def carregar_eventos():
 
     eventos = []
     for d in rows:
-        def to_float(val):
-            try:
-                return float(val) if val is not None else 0.0
-            except (ValueError, TypeError):
-                return 0.0
-
-        fat_bruto = to_float(d.get("faturamento_bruto"))
-        imp_nf = to_float(d.get("imposto_nf"))
-        custos_tot = to_float(d.get("custos_total"))
-        lucro = to_float(d.get("lucro_real")) if d.get("lucro_real") is not None else (fat_bruto - imp_nf - custos_tot)
+        fat_bruto = safe_float(d.get("faturamento_bruto"))
+        imp_nf = safe_float(d.get("imposto_nf"))
+        custos_tot = safe_float(d.get("custos_total"))
+        lucro = safe_float(d.get("lucro_real")) if d.get("lucro_real") is not None else (fat_bruto - imp_nf - custos_tot)
 
         forn_ext_list = parse_json_safely(d.get("fornecedores_externos"))
         if not forn_ext_list and (d.get("custo_fornecedor_externo") or d.get("desc_fornecedor_externo")):
-            c_val = to_float(d.get("custo_fornecedor_externo"))
+            c_val = safe_float(d.get("custo_fornecedor_externo"))
             d_desc = d.get("desc_fornecedor_externo") or "Fornecedor Externo"
             if c_val > 0 or d_desc:
                 forn_ext_list = [{"Descrição": d_desc, "Valor": c_val}]
 
         reembolsos_list = parse_json_safely(d.get("reembolsos"))
-        custo_reembolsos_total = sum(to_float(r.get("Valor", 0.0)) for r in reembolsos_list)
-        custo_forn_total = sum(to_float(f.get("Valor", 0.0)) for f in forn_ext_list)
+        custo_reembolsos_total = sum(safe_float(r.get("Valor", 0.0)) for r in reembolsos_list)
+        custo_forn_total = sum(safe_float(f.get("Valor", 0.0)) for f in forn_ext_list)
 
         eventos.append({
             "id": d.get("id"),
@@ -84,25 +103,25 @@ def carregar_eventos():
             "Data Montagem": d.get("data_montagem") or "",
             "Horário Montagem": d.get("horario_montagem") or "",
             "Complexo / Local": d.get("complexo") or "",
-            "Aprovado": to_float(d.get("aprovado")),
-            "Val. Extra": to_float(d.get("val_extra")),
+            "Aprovado": safe_float(d.get("aprovado")),
+            "Val. Extra": safe_float(d.get("val_extra")),
             "Itens Extras": parse_json_safely(d.get("itens_extras")),
             "Faturamento Bruto": fat_bruto,
             "10% NF": imp_nf,
             "Responsável Imposto": d.get("responsavel_imposto") or "Incluso no Valor",
             "Custos Operacionais + Logística": custos_tot,
-            "Custo Resolume": to_float(d.get("custo_resolume")),
-            "Custo Iluminação": to_float(d.get("custo_iluminacao")),
-            "Custo Sonorização": to_float(d.get("custo_sonorizacao")),
-            "Custo Diretor": to_float(d.get("custo_diretor")),
-            "Custo Logística": to_float(d.get("custo_logistica")),
+            "Custo Resolume": safe_float(d.get("custo_resolume")),
+            "Custo Iluminação": safe_float(d.get("custo_iluminacao")),
+            "Custo Sonorização": safe_float(d.get("custo_sonorizacao")),
+            "Custo Diretor": safe_float(d.get("custo_diretor")),
+            "Custo Logística": safe_float(d.get("custo_logistica")),
             "Fornecedores Externos": forn_ext_list,
             "Custo Fornecedor Externo": custo_forn_total,
             "Desc. Fornecedor Externo": ", ".join([str(f.get("Descrição", "")) for f in forn_ext_list]),
             "Reembolsos": reembolsos_list,
             "Custo Reembolsos": custo_reembolsos_total,
-            "Valor Recebido Cliente": to_float(d.get("val_recebido_cliente")),
-            "Valor Pago Equipe": to_float(d.get("val_pago_equipe")),
+            "Valor Recebido Cliente": safe_float(d.get("val_recebido_cliente")),
+            "Valor Pago Equipe": safe_float(d.get("val_pago_equipe")),
             "Status Recebimento": d.get("status_recebimento") or "Pendente",
             "Status Pagamento": d.get("status_pagamento") or "Pendente",
             "Lucro Real": lucro,
@@ -124,30 +143,30 @@ def salvar_evento_db(reg):
         "data_montagem": str(reg.get("Data Montagem") or ""),
         "horario_montagem": str(reg.get("Horário Montagem") or ""),
         "complexo": str(reg.get("Complexo / Local") or ""),
-        "aprovado": float(reg.get("Aprovado") or 0.0),
-        "val_extra": float(reg.get("Val. Extra") or 0.0),
+        "aprovado": safe_float(reg.get("Aprovado")),
+        "val_extra": safe_float(reg.get("Val. Extra")),
         "itens_extras": serializar_para_jsonb(reg.get("Itens Extras")),
-        "faturamento_bruto": float(reg.get("Faturamento Bruto") or 0.0),
-        "imposto_nf": float(reg.get("10% NF") or 0.0),
+        "faturamento_bruto": safe_float(reg.get("Faturamento Bruto")),
+        "imposto_nf": safe_float(reg.get("10% NF")),
         "responsavel_imposto": str(reg.get("Responsável Imposto") or "Incluso no Valor"),
-        "custos_total": float(reg.get("Custos Operacionais + Logística") or 0.0),
-        "custo_resolume": float(reg.get("Custo Resolume") or 0.0),
-        "custo_iluminacao": float(reg.get("Custo Iluminação") or 0.0),
-        "custo_sonorizacao": float(reg.get("Custo Sonorização") or 0.0),
-        "custo_diretor": float(reg.get("Custo Diretor") or 0.0),
-        "custo_logistica": float(reg.get("Custo Logística") or 0.0),
-        "custo_fornecedor_externo": float(reg.get("Custo Fornecedor Externo") or 0.0),
+        "custos_total": safe_float(reg.get("Custos Operacionais + Logística")),
+        "custo_resolume": safe_float(reg.get("Custo Resolume")),
+        "custo_iluminacao": safe_float(reg.get("Custo Iluminação")),
+        "custo_sonorizacao": safe_float(reg.get("Custo Sonorização")),
+        "custo_diretor": safe_float(reg.get("Custo Diretor")),
+        "custo_logistica": safe_float(reg.get("Custo Logística")),
+        "custo_fornecedor_externo": safe_float(reg.get("Custo Fornecedor Externo")),
         "desc_fornecedor_externo": str(reg.get("Desc. Fornecedor Externo") or ""),
         "fornecedores_externos": serializar_para_jsonb(reg.get("Fornecedores Externos")),
         "reembolsos": serializar_para_jsonb(reg.get("Reembolsos")),
-        "custo_reembolsos": float(reg.get("Custo Reembolsos") or 0.0),
-        "val_recebido_cliente": float(reg.get("Valor Recebido Cliente") or 0.0),
-        "val_pago_equipe": float(reg.get("Valor Pago Equipe") or 0.0),
+        "custo_reembolsos": safe_float(reg.get("Custo Reembolsos")),
+        "val_recebido_cliente": safe_float(reg.get("Valor Recebido Cliente")),
+        "val_pago_equipe": safe_float(reg.get("Valor Pago Equipe")),
         "status_recebimento": str(reg.get("Status Recebimento") or "Pendente"),
         "status_pagamento": str(reg.get("Status Pagamento") or "Pendente"),
-        "lucro_real": float(reg.get("Lucro Real") or 0.0),
-        "lucro_miguel": float(reg.get("Lucro Miguel Araújo") or 0.0),
-        "lucro_antonio": float(reg.get("Lucro Antonio Carlos") or 0.0),
+        "lucro_real": safe_float(reg.get("Lucro Real")),
+        "lucro_miguel": safe_float(reg.get("Lucro Miguel Araújo")),
+        "lucro_antonio": safe_float(reg.get("Lucro Antonio Carlos")),
         "pag_operacional": str(reg.get("Pag. Operacional") or ""),
         "rec_champions": str(reg.get("Rec. Champions") or ""),
         "equipamentos": str(reg.get("Equipamentos") or ""),
@@ -164,30 +183,30 @@ def atualizar_evento_db(id_evento, reg):
         "data_montagem": str(reg.get("Data Montagem") or ""),
         "horario_montagem": str(reg.get("Horário Montagem") or ""),
         "complexo": str(reg.get("Complexo / Local") or ""),
-        "aprovado": float(reg.get("Aprovado") or 0.0),
-        "val_extra": float(reg.get("Val. Extra") or 0.0),
+        "aprovado": safe_float(reg.get("Aprovado")),
+        "val_extra": safe_float(reg.get("Val. Extra")),
         "itens_extras": serializar_para_jsonb(reg.get("Itens Extras")),
-        "faturamento_bruto": float(reg.get("Faturamento Bruto") or 0.0),
-        "imposto_nf": float(reg.get("10% NF") or 0.0),
+        "faturamento_bruto": safe_float(reg.get("Faturamento Bruto")),
+        "imposto_nf": safe_float(reg.get("10% NF")),
         "responsavel_imposto": str(reg.get("Responsável Imposto") or "Incluso no Valor"),
-        "custos_total": float(reg.get("Custos Operacionais + Logística") or 0.0),
-        "custo_resolume": float(reg.get("Custo Resolume") or 0.0),
-        "custo_iluminacao": float(reg.get("Custo Iluminação") or 0.0),
-        "custo_sonorizacao": float(reg.get("Custo Sonorização") or 0.0),
-        "custo_diretor": float(reg.get("Custo Diretor") or 0.0),
-        "custo_logistica": float(reg.get("Custo Logística") or 0.0),
-        "custo_fornecedor_externo": float(reg.get("Custo Fornecedor Externo") or 0.0),
+        "custos_total": safe_float(reg.get("Custos Operacionais + Logística")),
+        "custo_resolume": safe_float(reg.get("Custo Resolume")),
+        "custo_iluminacao": safe_float(reg.get("Custo Iluminação")),
+        "custo_sonorizacao": safe_float(reg.get("Custo Sonorização")),
+        "custo_diretor": safe_float(reg.get("Custo Diretor")),
+        "custo_logistica": safe_float(reg.get("Custo Logística")),
+        "custo_fornecedor_externo": safe_float(reg.get("Custo Fornecedor Externo")),
         "desc_fornecedor_externo": str(reg.get("Desc. Fornecedor Externo") or ""),
         "fornecedores_externos": serializar_para_jsonb(reg.get("Fornecedores Externos")),
         "reembolsos": serializar_para_jsonb(reg.get("Reembolsos")),
-        "custo_reembolsos": float(reg.get("Custo Reembolsos") or 0.0),
-        "val_recebido_cliente": float(reg.get("Valor Recebido Cliente") or 0.0),
-        "val_pago_equipe": float(reg.get("Valor Pago Equipe") or 0.0),
+        "custo_reembolsos": safe_float(reg.get("Custo Reembolsos")),
+        "val_recebido_cliente": safe_float(reg.get("Valor Recebido Cliente")),
+        "val_pago_equipe": safe_float(reg.get("Valor Pago Equipe")),
         "status_recebimento": str(reg.get("Status Recebimento") or "Pendente"),
         "status_pagamento": str(reg.get("Status Pagamento") or "Pendente"),
-        "lucro_real": float(reg.get("Lucro Real") or 0.0),
-        "lucro_miguel": float(reg.get("Lucro Miguel Araújo") or 0.0),
-        "lucro_antonio": float(reg.get("Lucro Antonio Carlos") or 0.0),
+        "lucro_real": safe_float(reg.get("Lucro Real")),
+        "lucro_miguel": safe_float(reg.get("Lucro Miguel Araújo")),
+        "lucro_antonio": safe_float(reg.get("Lucro Antonio Carlos")),
         "pag_operacional": str(reg.get("Pag. Operacional") or ""),
         "rec_champions": str(reg.get("Rec. Champions") or ""),
         "equipamentos": str(reg.get("Equipamentos") or ""),
@@ -321,9 +340,9 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     story.append(t2)
     story.append(Spacer(1, 10))
 
-    val_base = float(registro.get("Aprovado", 0.0))
-    val_extra_tot = float(registro.get("Val. Extra", 0.0))
-    val_imposto = float(registro.get("10% NF", 0.0))
+    val_base = safe_float(registro.get("Aprovado", 0.0))
+    val_extra_tot = safe_float(registro.get("Val. Extra", 0.0))
+    val_imposto = safe_float(registro.get("10% NF", 0.0))
     resp_imposto = registro.get("Responsável Imposto", "Incluso no Valor")
     itens_extras = registro.get("Itens Extras", [])
 
@@ -340,7 +359,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         if itens_extras and len(itens_extras) > 0:
             for item in itens_extras:
                 desc = item.get("Descrição") or item.get("Descricao") or "Item Extra"
-                val = float(item.get("Valor", 0.0))
+                val = safe_float(item.get("Valor", 0.0))
                 dados_orc_resumo.append([
                     Paragraph(f"➕ Extra: {desc}", td_style),
                     Paragraph("Item Solicitado Adicionalmente", td_style),
@@ -380,7 +399,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
             dados_extras = [[Paragraph("DESCRIÇÃO DO ITEM EXTRA", th_style), Paragraph("VALOR (R$)", th_style)]]
             for item in itens_extras:
                 desc = item.get("Descrição") or item.get("Descricao") or "Item Extra"
-                val = float(item.get("Valor", 0.0))
+                val = safe_float(item.get("Valor", 0.0))
                 dados_extras.append([Paragraph(str(desc), td_style), Paragraph(f"R$ {val:,.2f}", td_bold)])
 
             t_extras = Table(dados_extras, colWidths=[420, 140])
@@ -402,7 +421,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
             dados_forn = [[Paragraph("SERVIÇO / FORNECEDOR", th_style), Paragraph("CUSTO (R$)", th_style)]]
             for f_item in fornecedores_list:
                 f_desc = f_item.get("Descrição") or "Fornecedor Externo"
-                f_val = float(f_item.get("Valor", 0.0))
+                f_val = safe_float(f_item.get("Valor", 0.0))
                 dados_forn.append([Paragraph(str(f_desc), td_style), Paragraph(f"R$ {f_val:,.2f}", td_bold)])
 
             t_forn = Table(dados_forn, colWidths=[420, 140])
@@ -425,7 +444,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
             for r_item in reembolsos_pdf_list:
                 r_fav = r_item.get("Favorecido") or "Não informado"
                 r_desc = r_item.get("Descrição") or "Reembolso Operacional"
-                r_val = float(r_item.get("Valor", 0.0))
+                r_val = safe_float(r_item.get("Valor", 0.0))
                 dados_reemb.append([Paragraph(str(r_fav), td_style), Paragraph(str(r_desc), td_style), Paragraph(f"R$ {r_val:,.2f}", td_bold)])
 
             t_reemb = Table(dados_reemb, colWidths=[160, 260, 140])
@@ -462,7 +481,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         texto_notas = """
         <b>⚠️ NOTAS DE CONVENÇÃO E CONDIÇÕES GERAIS</b><br/><br/>
         • <b>Otimização de Custos (Patrimônio do Local):</b> Em conformidade com a estratégia acordada, os custos de locação de ativos já disponíveis no estoque fixo da casa (como conversores/transmitters, receivers e mesas de som sobressalentes) foram integralmente deduzidos ou omitidos, evitando compras ou cobranças redundantes.<br/>
-        • <b>Período Operacional:</b> As diárias comerciais acima referem-se a uma jornada padrão por evento no período de 12hs. Prorrogações ou alterações de rider deverão ser notifiedas com antecedência de 48 horas.<br/>
+        • <b>Período Operacional:</b> As diárias comerciais acima referem-se a uma jornada padrão por evento no período de 12hs. Prorrogações ou alterações de rider deverão ser notificadas com antecedência de 48 horas.<br/>
         • <b>Faturamento & Compliance:</b> Pagamentos deverão ser realizados preferencialmente de forma antecipada à data dos eventos. As Notas Fiscais (NF) de prestação de serviços e locação serão emitidas no dia útil subsequente à realização de cada agenda.
         """
         t_notas = Table([[Paragraph(texto_notas, nota_text_style)]], colWidths=[560])
@@ -533,17 +552,17 @@ if faturamentos:
         df_kpi = df_kpi_raw
         lbl_contexto = "Consolidado Geral"
 
-    total_faturado = float(df_kpi["Faturamento Bruto"].sum())
-    total_custos_equipe = float(df_kpi["Custos Operacionais + Logística"].sum())
-    total_impostos = float(df_kpi["10% NF"].sum())
+    total_faturado = safe_float(df_kpi["Faturamento Bruto"].sum())
+    total_custos_equipe = safe_float(df_kpi["Custos Operacionais + Logística"].sum())
+    total_impostos = safe_float(df_kpi["10% NF"].sum())
     
-    total_recebido = float(df_kpi["Valor Recebido Cliente"].sum())
+    total_recebido = safe_float(df_kpi["Valor Recebido Cliente"].sum())
     total_falta_receber = total_faturado - total_recebido
     
-    total_pago_equipe = float(df_kpi["Valor Pago Equipe"].sum())
+    total_pago_equipe = safe_float(df_kpi["Valor Pago Equipe"].sum())
     total_falta_pagar_equipe = total_custos_equipe - total_pago_equipe
     
-    lucro_liquido_total = float(df_kpi["Lucro Real"].sum())
+    lucro_liquido_total = safe_float(df_kpi["Lucro Real"].sum())
 
     st.caption(f"Exibindo dados de: **{lbl_contexto}** ({len(df_kpi)} evento(s) encontrado(s))")
 
@@ -599,7 +618,7 @@ with aba1:
                 "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", min_value=0.0, step=50.0)
             }, key="editor_extras_novo"
         )
-        val_extra_total = float(df_extras_edit["Valor"].sum()) if not df_extras_edit.empty else 0.0
+        val_extra_total = safe_float(df_extras_edit["Valor"].sum()) if not df_extras_edit.empty else 0.0
 
         st.markdown("### 💸 4. Reembolsos e Despesas Operacionais Extras")
         df_reemb_init = pd.DataFrame([{"Favorecido": "", "Descrição": "", "Valor": 0.0}])
@@ -611,7 +630,7 @@ with aba1:
                 "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", min_value=0.0, step=10.0)
             }, key="editor_reembolsos_novo"
         )
-        val_reembolso_total = float(df_reemb_edit["Valor"].sum()) if not df_reemb_edit.empty else 0.0
+        val_reembolso_total = safe_float(df_reemb_edit["Valor"].sum()) if not df_reemb_edit.empty else 0.0
 
         st.markdown("### 💰 5. Faturamento & Negociação Fiscal")
         col_v1, col_v2, col_v3 = st.columns(3)
@@ -653,7 +672,7 @@ with aba1:
         )
         
         fornecedores_externos_novo = df_forn_edit.to_dict('records') if not df_forn_edit.empty else []
-        custo_externo_total = float(df_forn_edit["Valor"].sum()) if not df_forn_edit.empty else 0.0
+        custo_externo_total = safe_float(df_forn_edit["Valor"].sum()) if not df_forn_edit.empty else 0.0
         desc_externo_concat = ", ".join([str(f.get("Descrição", "")) for f in fornecedores_externos_novo if f.get("Descrição")])
 
         st.markdown("### 💳 7. Status Inicial de Caixa")
@@ -775,7 +794,7 @@ with aba2:
                     "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", min_value=0.0, step=50.0)
                 }, key=f"editor_extras_edit_{reg['id']}"
             )
-            e_val_extra_total = float(df_extras_updated["Valor"].sum()) if not df_extras_updated.empty else 0.0
+            e_val_extra_total = safe_float(df_extras_updated["Valor"].sum()) if not df_extras_updated.empty else 0.0
 
             st.markdown("#### 💸 4. Reembolsos e Despesas Extras do Evento")
             reemb_existentes = reg.get("Reembolsos", [])
@@ -788,12 +807,12 @@ with aba2:
                     "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", min_value=0.0, step=10.0)
                 }, key=f"editor_reemb_edit_{reg['id']}"
             )
-            e_val_reemb_total = float(df_reemb_updated["Valor"].sum()) if not df_reemb_updated.empty else 0.0
+            e_val_reemb_total = safe_float(df_reemb_updated["Valor"].sum()) if not df_reemb_updated.empty else 0.0
 
             st.markdown("#### 💰 5. Faturamento & Negociação Fiscal")
             col_ev1, col_ev2, col_ev3 = st.columns(3)
             with col_ev1:
-                e_val_aprovado = st.number_input("Valor Base Aprovado (R$)", value=float(reg["Aprovado"]), min_value=0.0, step=100.0)
+                e_val_aprovado = st.number_input("Valor Base Aprovado (R$)", value=safe_float(reg["Aprovado"]), min_value=0.0, step=100.0)
             
             opcoes_resp = ["Incluso no Valor", "Por Conta do Cliente", "Isento / Não Aplicável"]
             resp_atual = reg.get("Responsável Imposto", "Incluso no Valor")
@@ -818,16 +837,16 @@ with aba2:
 
             st.markdown("#### 👥 6. Custos: Equipe Técnica, Logística & Cachês")
             col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
-            with col_ep1: e_resolume = st.number_input("Resolume (R$)", value=float(reg["Custo Resolume"]))
-            with col_ep2: e_iluminacao = st.number_input("Iluminação (R$)", value=float(reg["Custo Iluminação"]))
-            with col_ep3: e_sonorizacao = st.number_input("Som (R$)", value=float(reg["Custo Sonorização"]))
-            with col_ep4: e_diretor = st.number_input("Diretor (R$)", value=float(reg["Custo Diretor"]))
-            with col_ep5: e_logistica = st.number_input("Logística (R$)", value=float(reg["Custo Logística"]))
+            with col_ep1: e_resolume = st.number_input("Resolume (R$)", value=safe_float(reg["Custo Resolume"]))
+            with col_ep2: e_iluminacao = st.number_input("Iluminação (R$)", value=safe_float(reg["Custo Iluminação"]))
+            with col_ep3: e_sonorizacao = st.number_input("Som (R$)", value=safe_float(reg["Custo Sonorização"]))
+            with col_ep4: e_diretor = st.number_input("Diretor (R$)", value=safe_float(reg["Custo Diretor"]))
+            with col_ep5: e_logistica = st.number_input("Logística (R$)", value=safe_float(reg["Custo Logística"]))
 
             st.markdown("#### 🌐 Fornecedores Externos")
             forn_existentes = reg.get("Fornecedores Externos", [])
             if not forn_existentes:
-                forn_existentes = [{"Descrição": reg.get("Desc. Fornecedor Externo", ""), "Valor": float(reg.get("Custo Fornecedor Externo", 0.0))}]
+                forn_existentes = [{"Descrição": reg.get("Desc. Fornecedor Externo", ""), "Valor": safe_float(reg.get("Custo Fornecedor Externo", 0.0))}]
             
             df_forn_edit_existing = pd.DataFrame(forn_existentes)
             df_forn_updated = st.data_editor(
@@ -841,9 +860,9 @@ with aba2:
             st.markdown("#### 💳 7. Baixas de Caixa (Pagamentos e Recebimentos)")
             c_rec1, c_rec2 = st.columns(2)
             with c_rec1:
-                e_val_rec = st.number_input("Valor JÁ RECEBIDO do Cliente (R$)", value=float(reg["Valor Recebido Cliente"]))
+                e_val_rec = st.number_input("Valor JÁ RECEBIDO do Cliente (R$)", value=safe_float(reg["Valor Recebido Cliente"]))
             with c_rec2:
-                e_val_pago = st.number_input("Valor JÁ PAGO à Equipe/Fornecedores/Reembolsos (R$)", value=float(reg["Valor Pago Equipe"]))
+                e_val_pago = st.number_input("Valor JÁ PAGO à Equipe/Fornecedores/Reembolsos (R$)", value=safe_float(reg["Valor Pago Equipe"]))
 
             e_obs = st.text_area("Observações Gerais", value=reg["Observações"])
 
@@ -856,7 +875,7 @@ with aba2:
 
             if btn_salvar_baixa:
                 forn_atualizados_list = df_forn_updated.to_dict('records') if not df_forn_updated.empty else []
-                e_externo_total = float(df_forn_updated["Valor"].sum()) if not df_forn_updated.empty else 0.0
+                e_externo_total = safe_float(df_forn_updated["Valor"].sum()) if not df_forn_updated.empty else 0.0
                 e_desc_externo_concat = ", ".join([str(f.get("Descrição", "")) for f in forn_atualizados_list if f.get("Descrição")])
 
                 extras_atualizados_list = df_extras_updated.to_dict('records') if not df_extras_updated.empty else []
