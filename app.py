@@ -38,8 +38,8 @@ def parse_json_safely(val):
     except (json.JSONDecodeError, TypeError):
         return []
 
-def serializar_para_supabase(dados):
-    """Garante que listas/dicionários sejam válidos para colunas JSONB no Supabase."""
+def serializar_para_jsonb(dados):
+    """Garante que dicionários e listas sejam passados corretamente para colunas JSONB no Supabase."""
     if isinstance(dados, (list, dict)):
         return dados
     return []
@@ -126,7 +126,7 @@ def salvar_evento_db(reg):
         "complexo": str(reg.get("Complexo / Local") or ""),
         "aprovado": float(reg.get("Aprovado") or 0.0),
         "val_extra": float(reg.get("Val. Extra") or 0.0),
-        "itens_extras": serializar_para_supabase(reg.get("Itens Extras")),
+        "itens_extras": serializar_para_jsonb(reg.get("Itens Extras")),
         "faturamento_bruto": float(reg.get("Faturamento Bruto") or 0.0),
         "imposto_nf": float(reg.get("10% NF") or 0.0),
         "responsavel_imposto": str(reg.get("Responsável Imposto") or "Incluso no Valor"),
@@ -138,8 +138,8 @@ def salvar_evento_db(reg):
         "custo_logistica": float(reg.get("Custo Logística") or 0.0),
         "custo_fornecedor_externo": float(reg.get("Custo Fornecedor Externo") or 0.0),
         "desc_fornecedor_externo": str(reg.get("Desc. Fornecedor Externo") or ""),
-        "fornecedores_externos": serializar_para_supabase(reg.get("Fornecedores Externos")),
-        "reembolsos": serializar_para_supabase(reg.get("Reembolsos")),
+        "fornecedores_externos": serializar_para_jsonb(reg.get("Fornecedores Externos")),
+        "reembolsos": serializar_para_jsonb(reg.get("Reembolsos")),
         "custo_reembolsos": float(reg.get("Custo Reembolsos") or 0.0),
         "val_recebido_cliente": float(reg.get("Valor Recebido Cliente") or 0.0),
         "val_pago_equipe": float(reg.get("Valor Pago Equipe") or 0.0),
@@ -166,7 +166,7 @@ def atualizar_evento_db(id_evento, reg):
         "complexo": str(reg.get("Complexo / Local") or ""),
         "aprovado": float(reg.get("Aprovado") or 0.0),
         "val_extra": float(reg.get("Val. Extra") or 0.0),
-        "itens_extras": serializar_para_supabase(reg.get("Itens Extras")),
+        "itens_extras": serializar_para_jsonb(reg.get("Itens Extras")),
         "faturamento_bruto": float(reg.get("Faturamento Bruto") or 0.0),
         "imposto_nf": float(reg.get("10% NF") or 0.0),
         "responsavel_imposto": str(reg.get("Responsável Imposto") or "Incluso no Valor"),
@@ -178,8 +178,8 @@ def atualizar_evento_db(id_evento, reg):
         "custo_logistica": float(reg.get("Custo Logística") or 0.0),
         "custo_fornecedor_externo": float(reg.get("Custo Fornecedor Externo") or 0.0),
         "desc_fornecedor_externo": str(reg.get("Desc. Fornecedor Externo") or ""),
-        "fornecedores_externos": serializar_para_supabase(reg.get("Fornecedores Externos")),
-        "reembolsos": serializar_para_supabase(reg.get("Reembolsos")),
+        "fornecedores_externos": serializar_para_jsonb(reg.get("Fornecedores Externos")),
+        "reembolsos": serializar_para_jsonb(reg.get("Reembolsos")),
         "custo_reembolsos": float(reg.get("Custo Reembolsos") or 0.0),
         "val_recebido_cliente": float(reg.get("Valor Recebido Cliente") or 0.0),
         "val_pago_equipe": float(reg.get("Valor Pago Equipe") or 0.0),
@@ -462,7 +462,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         texto_notas = """
         <b>⚠️ NOTAS DE CONVENÇÃO E CONDIÇÕES GERAIS</b><br/><br/>
         • <b>Otimização de Custos (Patrimônio do Local):</b> Em conformidade com a estratégia acordada, os custos de locação de ativos já disponíveis no estoque fixo da casa (como conversores/transmitters, receivers e mesas de som sobressalentes) foram integralmente deduzidos ou omitidos, evitando compras ou cobranças redundantes.<br/>
-        • <b>Período Operacional:</b> As diárias comerciais acima referem-se a uma jornada padrão por evento no período de 12hs. Prorrogações ou alterações de rider deverão ser notificadas com antecedência de 48 horas.<br/>
+        • <b>Período Operacional:</b> As diárias comerciais acima referem-se a uma jornada padrão por evento no período de 12hs. Prorrogações ou alterações de rider deverão ser notifiedas com antecedência de 48 horas.<br/>
         • <b>Faturamento & Compliance:</b> Pagamentos deverão ser realizados preferencialmente de forma antecipada à data dos eventos. As Notas Fiscais (NF) de prestação de serviços e locação serão emitidas no dia útil subsequente à realização de cada agenda.
         """
         t_notas = Table([[Paragraph(texto_notas, nota_text_style)]], colWidths=[560])
