@@ -17,7 +17,6 @@ from reportlab.lib import colors
 # --- CONFIGURAÇÃO E PERSISTÊNCIA VIA SUPABASE ---
 @st.cache_resource
 def init_supabase() -> Client:
-    # Tratamento para garantir URL limpa sem barras no final ou espaços
     url = st.secrets["SUPABASE_URL"].strip().rstrip("/")
     key = st.secrets["SUPABASE_KEY"].strip()
     return create_client(url, key)
@@ -40,7 +39,6 @@ def parse_json_safely(val):
         return []
 
 def limpar_valor_json(obj):
-    """Remove NaNs, Nones e converte objetos não serializáveis em tipos válidos para JSON."""
     if isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
             return 0.0
@@ -52,7 +50,6 @@ def limpar_valor_json(obj):
     return obj
 
 def serializar_para_jsonb(dados):
-    """Garante que dicionários e listas sejam estritamente compatíveis com JSONB no Supabase."""
     if isinstance(dados, pd.DataFrame):
         dados = dados.to_dict('records')
     if isinstance(dados, (list, dict)):
@@ -60,7 +57,6 @@ def serializar_para_jsonb(dados):
     return []
 
 def safe_float(val):
-    """Garante conversão segura para float sem retornar NaN ou Inf."""
     try:
         f = float(val)
         if math.isnan(f) or math.isinf(f):
@@ -92,8 +88,37 @@ def carregar_eventos():
                 forn_ext_list = [{"Descrição": d_desc, "Valor": c_val}]
 
         reembolsos_list = parse_json_safely(d.get("reembolsos"))
+        hist_rec_list = parse_json_safely(d.get("historico_recebimentos"))
+        hist_pag_list = parse_json_safely(d.get("historico_pagamentos"))
+
+        # Soma real dos pagamentos picados
+        val_recebido_calc = sum(safe_float(r.get("Valor", 0.0)) for r in hist_rec_list)
+        val_pago_calc = sum(safe_float(p.get("Valor", 0.0)) for p in hist_pag_list)
+
+        # Se houver valor antigo gravado no campo direto e o histórico estiver vazio, mantemos o legado
+        val_rec_final = val_recebido_calc if hist_rec_list else safe_float(d.get("val_recebido_cliente"))
+        val_pago_final = val_pago_calc if hist_pag_list else safe_float(d.get("val_pago_equipe"))
+
         custo_reembolsos_total = sum(safe_float(r.get("Valor", 0.0)) for r in reembolsos_list)
         custo_forn_total = sum(safe_float(f.get("Valor", 0.0)) for f in forn_ext_list)
+
+        # Status Dinâmico de Caixa
+        falta_rec = fat_bruto - val_rec_final
+        falta_pag = custos_tot - val_pago_final
+
+        if val_rec_final >= fat_bruto and fat_bruto > 0:
+            st_rec = "Pago Total"
+        elif val_rec_final > 0:
+            st_rec = f"Parcial (Falta R$ {falta_rec:,.2f})"
+        else:
+            st_rec = "Pendente"
+
+        if val_pago_final >= custos_tot and custos_tot > 0:
+            st_pag = "Pago Total"
+        elif val_pago_final > 0:
+            st_pag = f"Parcial (Falta R$ {falta_pag:,.2f})"
+        else:
+            st_pag = "Pendente"
 
         eventos.append({
             "id": d.get("id"),
@@ -120,10 +145,12 @@ def carregar_eventos():
             "Desc. Fornecedor Externo": ", ".join([str(f.get("Descrição", "")) for f in forn_ext_list]),
             "Reembolsos": reembolsos_list,
             "Custo Reembolsos": custo_reembolsos_total,
-            "Valor Recebido Cliente": safe_float(d.get("val_recebido_cliente")),
-            "Valor Pago Equipe": safe_float(d.get("val_pago_equipe")),
-            "Status Recebimento": d.get("status_recebimento") or "Pendente",
-            "Status Pagamento": d.get("status_pagamento") or "Pendente",
+            "Historico Recebimentos": hist_rec_list,
+            "Historico Pagamentos": hist_pag_list,
+            "Valor Recebido Cliente": val_rec_final,
+            "Valor Pago Equipe": val_pago_final,
+            "Status Recebimento": st_rec,
+            "Status Pagamento": st_pag,
             "Lucro Real": lucro,
             "Lucro Miguel Araújo": lucro * 0.50,
             "Lucro Antonio Carlos": lucro * 0.50,
@@ -134,7 +161,6 @@ def carregar_eventos():
             "Observações": d.get("observacoes") or ""
         })
 
-    # Função auxiliar para converter "DD/MM/AAAA" em objeto de data real para ordenação correta
     def extrair_data_obj(item):
         dt_str = item.get("Data Evento", "")
         try:
@@ -142,9 +168,7 @@ def carregar_eventos():
         except (ValueError, TypeError):
             return datetime.min
 
-    # Ordena a lista do evento mais recente/futuro para o mais antigo (Decrescente)
     eventos.sort(key=extrair_data_obj, reverse=True)
-
     return eventos
 
 def salvar_evento_db(reg):
@@ -171,6 +195,8 @@ def salvar_evento_db(reg):
         "desc_fornecedor_externo": str(reg.get("Desc. Fornecedor Externo") or ""),
         "fornecedores_externos": serializar_para_jsonb(reg.get("Fornecedores Externos")),
         "reembolsos": serializar_para_jsonb(reg.get("Reembolsos")),
+        "historico_recebimentos": serializar_para_jsonb(reg.get("Historico Recebimentos")),
+        "historico_pagamentos": serializar_para_jsonb(reg.get("Historico Pagamentos")),
         "custo_reembolsos": safe_float(reg.get("Custo Reembolsos")),
         "val_recebido_cliente": safe_float(reg.get("Valor Recebido Cliente")),
         "val_pago_equipe": safe_float(reg.get("Valor Pago Equipe")),
@@ -211,6 +237,8 @@ def atualizar_evento_db(id_evento, reg):
         "desc_fornecedor_externo": str(reg.get("Desc. Fornecedor Externo") or ""),
         "fornecedores_externos": serializar_para_jsonb(reg.get("Fornecedores Externos")),
         "reembolsos": serializar_para_jsonb(reg.get("Reembolsos")),
+        "historico_recebimentos": serializar_para_jsonb(reg.get("Historico Recebimentos")),
+        "historico_pagamentos": serializar_para_jsonb(reg.get("Historico Pagamentos")),
         "custo_reembolsos": safe_float(reg.get("Custo Reembolsos")),
         "val_recebido_cliente": safe_float(reg.get("Valor Recebido Cliente")),
         "val_pago_equipe": safe_float(reg.get("Valor Pago Equipe")),
@@ -690,9 +718,12 @@ with aba1:
         st.markdown("### 💳 7. Status Inicial de Caixa")
         col_st1, col_st2 = st.columns(2)
         with col_st1:
-            val_recebido_init = st.number_input("Quanto o cliente JÁ PAGOU? (R$)", min_value=0.0, step=100.0, key="v_rec_init")
+            val_recebido_init = st.number_input("Quanto o cliente JÁ PAGOU inicial? (R$)", min_value=0.0, step=100.0, key="v_rec_init")
         with col_st2:
-            val_pago_equipe_init = st.number_input("Quanto você JÁ PAGOU à equipe/fornecedores/reembolsos? (R$)", min_value=0.0, step=100.0, key="v_pag_init")
+            val_pago_equipe_init = st.number_input("Quanto você JÁ PAGOU à equipe inicial? (R$)", min_value=0.0, step=100.0, key="v_pag_init")
+
+        hist_rec_novo = [{"Data": datetime.now().strftime("%d/%m/%Y"), "Valor": val_recebido_init, "Forma": "Sinal / Inicial", "Obs": "Lançamento de Cadastro"}] if val_recebido_init > 0 else []
+        hist_pag_novo = [{"Data": datetime.now().strftime("%d/%m/%Y"), "Favorecido": "Equipe / Diversos", "Valor": val_pago_equipe_init, "Obs": "Adiantamento de Cadastro"}] if val_pago_equipe_init > 0 else []
 
         col_d1, col_d2 = st.columns(2)
         with col_d1: dt_pag_operacional = st.date_input("Previsão Pagamento Operacional")
@@ -708,8 +739,8 @@ with aba1:
         else:
             lucro_real = faturamento_bruto_calc - imposto_nf_calc - total_custos_op
 
-        status_rec = "Pago Total" if val_recebido_init >= faturamento_bruto_calc and faturamento_bruto_calc > 0 else ("Parcial" if val_recebido_init > 0 else "Pendente")
-        status_pag = "Pago Total" if val_pago_equipe_init >= total_custos_op and total_custos_op > 0 else ("Parcial" if val_pago_equipe_init > 0 else "Pendente")
+        st_rec = "Pago Total" if val_recebido_init >= faturamento_bruto_calc and faturamento_bruto_calc > 0 else ("Parcial" if val_recebido_init > 0 else "Pendente")
+        st_pag = "Pago Total" if val_pago_equipe_init >= total_custos_op and total_custos_op > 0 else ("Parcial" if val_pago_equipe_init > 0 else "Pendente")
 
         st.markdown("---")
         if st.button("💾 Gravar Evento no Controle Financeiro", use_container_width=True):
@@ -736,11 +767,13 @@ with aba1:
                 "Desc. Fornecedor Externo": desc_externo_concat,
                 "Fornecedores Externos": fornecedores_externos_novo,
                 "Reembolsos": reembolsos_novo,
+                "Historico Recebimentos": hist_rec_novo,
+                "Historico Pagamentos": hist_pag_novo,
                 "Custo Reembolsos": val_reembolso_total,
                 "Valor Recebido Cliente": val_recebido_init,
                 "Valor Pago Equipe": val_pago_equipe_init,
-                "Status Recebimento": status_rec,
-                "Status Pagamento": status_pag,
+                "Status Recebimento": st_rec,
+                "Status Pagamento": st_pag,
                 "Lucro Real": lucro_real,
                 "Lucro Miguel Araújo": lucro_real * 0.50,
                 "Lucro Antonio Carlos": lucro_real * 0.50,
@@ -754,21 +787,21 @@ with aba1:
             st.success("✅ Evento cadastrado com sucesso no Supabase!")
             st.rerun()
 
-# ABA 2: EDITAR COMPLETO, REEMBOLSOS E BAIXAS
+# ABA 2: EDITAR COMPLETO, REEMBOLSOS E BAIXAS PARCIAIS
 with aba2:
-    st.subheader("✏️ Edição Completa, Reembolsos e Baixas")
+    st.subheader("✏️ Edição Completa, Baixas Parciais & Extrato de Caixa")
     if not faturamentos:
         st.info("Nenhum evento registrado no banco de dados.")
     else:
         idx_edit = st.selectbox(
-            "Selecione o Evento para Editar:", range(len(faturamentos)),
+            "Selecione o Evento para Gestão Financeira:", range(len(faturamentos)),
             format_func=lambda x: f"ID #{faturamentos[x]['id']} - {faturamentos[x]['Cliente']} ({faturamentos[x]['Data Evento']})"
         )
         
         reg = faturamentos[idx_edit]
         
         with st.form(f"form_edicao_completa_{reg['id']}"):
-            st.markdown(f"### 📍 Editando Evento ID #{reg['id']}")
+            st.markdown(f"### 📍 Gerenciando Evento ID #{reg['id']} - {reg['Cliente']}")
             
             st.markdown("#### 📋 1. Identificação do Evento")
             ce_col1, ce_col2, ce_col3 = st.columns(3)
@@ -869,39 +902,87 @@ with aba2:
                 }, key=f"editor_forn_edit_{reg['id']}"
             )
 
-            st.markdown("#### 💳 7. Baixas de Caixa (Pagamentos e Recebimentos)")
-            c_rec1, c_rec2 = st.columns(2)
-            with c_rec1:
-                e_val_rec = st.number_input("Valor JÁ RECEBIDO do Cliente (R$)", value=safe_float(reg["Valor Recebido Cliente"]))
-            with c_rec2:
-                e_val_pago = st.number_input("Valor JÁ PAGO à Equipe/Fornecedores/Reembolsos (R$)", value=safe_float(reg["Valor Pago Equipe"]))
+            st.markdown("---")
+            st.markdown("#### 💳 7. Extrato e Lançamentos de Recebimentos Picados (Cliente)")
+            
+            hist_rec_existente = reg.get("Historico Recebimentos", [])
+            df_hist_rec = pd.DataFrame(hist_rec_existente if hist_rec_existente else [{"Data": datetime.now().strftime("%d/%m/%Y"), "Valor": safe_float(reg.get("Valor Recebido Cliente")), "Forma": "Pix", "Obs": "Entrada Inicial"}])
+            
+            df_hist_rec_updated = st.data_editor(
+                df_hist_rec, num_rows="dynamic", use_container_width=True,
+                column_config={
+                    "Data": st.column_config.TextColumn("Data Pagamento", required=True),
+                    "Valor": st.column_config.NumberColumn("Valor Pago (R$)", format="R$ %.2f", min_value=0.0, step=100.0),
+                    "Forma": st.column_config.SelectboxColumn("Forma de Pagamento", options=["Pix", "Transferência/TED", "Boleto", "Dinheiro", "Outro"]),
+                    "Obs": st.column_config.TextColumn("Observações / Comprovante")
+                }, key=f"editor_hist_rec_{reg['id']}"
+            )
+            
+            total_rec_calculado = safe_float(df_hist_rec_updated["Valor"].sum()) if not df_hist_rec_updated.empty else 0.0
+            falta_receber_calc = e_fat_bruto_calc - total_rec_calculado
+            
+            st.warning(f"**Situação de Caixa (Cliente):** Total Faturado: **R$ {e_fat_bruto_calc:,.2f}** | Já Recebido: **R$ {total_rec_calculado:,.2f}** | ⏳ **FALTA RECEBER: R$ {falta_receber_calc:,.2f}**")
 
-            e_obs = st.text_area("Observações Gerais", value=reg["Observações"])
+            st.markdown("---")
+            st.markdown("#### 💸 8. Extrato e Lançamentos de Pagamentos Picados (Equipe / Fornecedores / Reembolsos)")
+            
+            hist_pag_existente = reg.get("Historico Pagamentos", [])
+            df_hist_pag = pd.DataFrame(hist_pag_existente if hist_pag_existente else [{"Data": datetime.now().strftime("%d/%m/%Y"), "Favorecido": "Equipe / Reembolsos", "Valor": safe_float(reg.get("Valor Pago Equipe")), "Obs": "Adiantamento"}])
+            
+            df_hist_pag_updated = st.data_editor(
+                df_hist_pag, num_rows="dynamic", use_container_width=True,
+                column_config={
+                    "Data": st.column_config.TextColumn("Data Pagamento", required=True),
+                    "Favorecido": st.column_config.TextColumn("Quem Recebeu (Nome)", required=True),
+                    "Valor": st.column_config.NumberColumn("Valor Pago (R$)", format="R$ %.2f", min_value=0.0, step=50.0),
+                    "Obs": st.column_config.TextColumn("Observações / Referência")
+                }, key=f"editor_hist_pag_{reg['id']}"
+            )
+
+            forn_atualizados_list = df_forn_updated.to_dict('records') if not df_forn_updated.empty else []
+            e_externo_total = safe_float(df_forn_updated["Valor"].sum()) if not df_forn_updated.empty else 0.0
+            novos_custos_totais = e_resolume + e_iluminacao + e_sonorizacao + e_diretor + e_logistica + e_externo_total + e_val_reemb_total
+
+            total_pago_calculado = safe_float(df_hist_pag_updated["Valor"].sum()) if not df_hist_pag_updated.empty else 0.0
+            falta_pagar_calc = novos_custos_totais - total_pago_calculado
+
+            st.warning(f"**Situação de Caixa (Equipe/Fornecedores):** Total Custos: **R$ {novos_custos_totais:,.2f}** | Já Pago: **R$ {total_pago_calculado:,.2f}** | ⚠️ **FALTA PAGAR: R$ {falta_pagar_calc:,.2f}**")
+
+            e_obs = st.text_area("Observações Gerais do Evento", value=reg["Observações"])
 
             st.markdown("---")
             col_btn1, col_btn2 = st.columns([3, 1])
             with col_btn1:
-                btn_salvar_baixa = st.form_submit_button("🔄 Salvar Alterações no Supabase", use_container_width=True)
+                btn_salvar_baixa = st.form_submit_button("🔄 Salvar Alterações e Histórico no Supabase", use_container_width=True)
             with col_btn2:
                 btn_excluir_eve = st.form_submit_button("❌ Excluir Evento", use_container_width=True)
 
             if btn_salvar_baixa:
-                forn_atualizados_list = df_forn_updated.to_dict('records') if not df_forn_updated.empty else []
-                e_externo_total = safe_float(df_forn_updated["Valor"].sum()) if not df_forn_updated.empty else 0.0
                 e_desc_externo_concat = ", ".join([str(f.get("Descrição", "")) for f in forn_atualizados_list if f.get("Descrição")])
-
                 extras_atualizados_list = df_extras_updated.to_dict('records') if not df_extras_updated.empty else []
                 reemb_atualizados_list = df_reemb_updated.to_dict('records') if not df_reemb_updated.empty else []
 
-                novos_custos = e_resolume + e_iluminacao + e_sonorizacao + e_diretor + e_logistica + e_externo_total + e_val_reemb_total
-                
-                if e_resp_imposto == "Por Conta do Cliente":
-                    novo_lucro = (e_fat_bruto_calc - e_imposto_nf_calc) - e_imposto_nf_calc - novos_custos
-                else:
-                    novo_lucro = e_fat_bruto_calc - e_imposto_nf_calc - novos_custos
+                hist_rec_updated_list = df_hist_rec_updated.to_dict('records') if not df_hist_rec_updated.empty else []
+                hist_pag_updated_list = df_hist_pag_updated.to_dict('records') if not df_hist_pag_updated.empty else []
 
-                st_rec = "Pago Total" if e_val_rec >= e_fat_bruto_calc and e_fat_bruto_calc > 0 else ("Parcial" if e_val_rec > 0 else "Pendente")
-                st_pag = "Pago Total" if e_val_pago >= novos_custos and novos_custos > 0 else ("Parcial" if e_val_pago > 0 else "Pendente")
+                if e_resp_imposto == "Por Conta do Cliente":
+                    novo_lucro = (e_fat_bruto_calc - e_imposto_nf_calc) - e_imposto_nf_calc - novos_custos_totais
+                else:
+                    novo_lucro = e_fat_bruto_calc - e_imposto_nf_calc - novos_custos_totais
+
+                if total_rec_calculado >= e_fat_bruto_calc and e_fat_bruto_calc > 0:
+                    st_rec = "Pago Total"
+                elif total_rec_calculado > 0:
+                    st_rec = f"Parcial (Falta R$ {falta_receber_calc:,.2f})"
+                else:
+                    st_rec = "Pendente"
+
+                if total_pago_calculado >= novos_custos_totais and novos_custos_totais > 0:
+                    st_pag = "Pago Total"
+                elif total_pago_calculado > 0:
+                    st_pag = f"Parcial (Falta R$ {falta_pagar_calc:,.2f})"
+                else:
+                    st_pag = "Pendente"
 
                 reg_atualizado = {
                     "Cliente": e_cliente,
@@ -916,7 +997,7 @@ with aba2:
                     "Faturamento Bruto": e_fat_bruto_calc,
                     "10% NF": e_imposto_nf_calc,
                     "Responsável Imposto": e_resp_imposto,
-                    "Custos Operacionais + Logística": novos_custos,
+                    "Custos Operacionais + Logística": novos_custos_totais,
                     "Custo Resolume": e_resolume,
                     "Custo Iluminação": e_iluminacao,
                     "Custo Sonorização": e_sonorizacao,
@@ -926,9 +1007,11 @@ with aba2:
                     "Desc. Fornecedor Externo": e_desc_externo_concat,
                     "Fornecedores Externos": forn_atualizados_list,
                     "Reembolsos": reemb_atualizados_list,
+                    "Historico Recebimentos": hist_rec_updated_list,
+                    "Historico Pagamentos": hist_pag_updated_list,
                     "Custo Reembolsos": e_val_reemb_total,
-                    "Valor Recebido Cliente": e_val_rec,
-                    "Valor Pago Equipe": e_val_pago,
+                    "Valor Recebido Cliente": total_rec_calculado,
+                    "Valor Pago Equipe": total_pago_calculado,
                     "Status Recebimento": st_rec,
                     "Status Pagamento": st_pag,
                     "Lucro Real": novo_lucro,
@@ -941,7 +1024,7 @@ with aba2:
                     "Observações": e_obs if e_obs else "Nenhuma observação."
                 }
                 atualizar_evento_db(reg['id'], reg_atualizado)
-                st.success("✅ Evento atualizado com sucesso no Supabase!")
+                st.success("✅ Evento e Histórico de Pagamentos atualizados com sucesso no Supabase!")
                 st.rerun()
 
             if btn_excluir_eve:
@@ -959,8 +1042,6 @@ with aba3:
         st.markdown("### 📋 Cronograma de Montagens e Eventos")
         
         df_cal_display = df_cal[["Data Montagem", "Horário Montagem", "Data Evento", "Horário", "Cliente", "Complexo / Local", "Equipe Técnica"]].copy()
-        df_cal_display.sort_values(by="Data Evento", ascending=True, inplace=True)
-        
         st.dataframe(df_cal_display, use_container_width=True)
 
 # ABA 4: GERADOR DE RECIBOS DE CACHÊ / REEMBOLSO
@@ -1004,7 +1085,6 @@ with aba5:
         st.info("Nenhum dado financeiro registrado para gráficos.")
     else:
         df_dash = pd.DataFrame(faturamentos)
-        
         st.markdown("### 📈 Desempenho Financeiro por Cliente")
         df_dash_grp = df_dash.groupby("Cliente")[["Faturamento Bruto", "Custos Operacionais + Logística", "Lucro Real"]].sum()
         st.bar_chart(df_dash_grp)
@@ -1032,6 +1112,7 @@ with aba6:
 📅 *Data do Evento:* {evt_wsp['Data Evento']} ({evt_wsp['Horário']})
 📍 *Local:* {evt_wsp['Complexo / Local']}
 💵 *Valor Global:* R$ {evt_wsp['Faturamento Bruto']:,.2f}
+⏳ *Saldo Pendente:* R$ {(evt_wsp['Faturamento Bruto'] - evt_wsp['Valor Recebido Cliente']):,.2f}
 
 Permanecemos à disposição!
 *Miguel Araújo Produções*"""
@@ -1098,7 +1179,7 @@ with aba7:
         st.dataframe(
             df_full[[
                 "id", "Cliente", "Data Evento", "Complexo / Local", "Aprovado", "Val. Extra", "Custo Reembolsos", "Responsável Imposto", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
-                "Custos Operacionais + Logística", "Desc. Fornecedor Externo", "Custo Fornecedor Externo", "Valor Pago Equipe", "Falta Pagar (Equipe/Ext)", "Lucro Real",
+                "Status Recebimento", "Custos Operacionais + Logística", "Desc. Fornecedor Externo", "Custo Fornecedor Externo", "Valor Pago Equipe", "Falta Pagar (Equipe/Ext)", "Status Pagamento", "Lucro Real",
                 "Lucro Miguel Araújo", "Lucro Antonio Carlos"
             ]],
             use_container_width=True
