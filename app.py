@@ -903,7 +903,7 @@ with aba2:
             )
 
             st.markdown("---")
-            st.markdown("#### 💳 7. Extrato e Lançamentos de Recebimentos Picados (Cliente)")
+            st.markdown("#### 💳 7. Extrato e Lançamentos de Recebimentos Parciais (Cliente)")
             
             hist_rec_existente = reg.get("Historico Recebimentos", [])
             df_hist_rec = pd.DataFrame(hist_rec_existente if hist_rec_existente else [{"Data": datetime.now().strftime("%d/%m/%Y"), "Valor": safe_float(reg.get("Valor Recebido Cliente")), "Forma": "Pix", "Obs": "Entrada Inicial"}])
@@ -924,7 +924,7 @@ with aba2:
             st.warning(f"**Situação de Caixa (Cliente):** Total Faturado: **R$ {e_fat_bruto_calc:,.2f}** | Já Recebido: **R$ {total_rec_calculado:,.2f}** | ⏳ **FALTA RECEBER: R$ {falta_receber_calc:,.2f}**")
 
             st.markdown("---")
-            st.markdown("#### 💸 8. Extrato e Lançamentos de Pagamentos Picados (Equipe / Fornecedores / Reembolsos)")
+            st.markdown("#### 💸 8. Extrato e Lançamentos de Pagamentos Parciais (Equipe / Fornecedores / Reembolsos)")
             
             hist_pag_existente = reg.get("Historico Pagamentos", [])
             df_hist_pag = pd.DataFrame(hist_pag_existente if hist_pag_existente else [{"Data": datetime.now().strftime("%d/%m/%Y"), "Favorecido": "Equipe / Reembolsos", "Valor": safe_float(reg.get("Valor Pago Equipe")), "Obs": "Adiantamento"}])
