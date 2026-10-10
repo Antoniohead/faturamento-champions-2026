@@ -71,7 +71,7 @@ def safe_float(val):
 
 def carregar_eventos():
     try:
-        response = supabase.table("eventos").select("*").order("id", desc=True).execute()
+        response = supabase.table("eventos").select("*").execute()
         rows = response.data or []
     except Exception as e:
         st.error(f"Erro ao carregar dados do Supabase: {e}")
@@ -133,6 +133,18 @@ def carregar_eventos():
             "Equipe Técnica": d.get("equipe_tecnica") or "",
             "Observações": d.get("observacoes") or ""
         })
+
+    # Função auxiliar para converter "DD/MM/AAAA" em objeto de data real para ordenação correta
+    def extrair_data_obj(item):
+        dt_str = item.get("Data Evento", "")
+        try:
+            return datetime.strptime(dt_str, "%d/%m/%Y")
+        except (ValueError, TypeError):
+            return datetime.min
+
+    # Ordena a lista do evento mais recente/futuro para o mais antigo (Decrescente)
+    eventos.sort(key=extrair_data_obj, reverse=True)
+
     return eventos
 
 def salvar_evento_db(reg):
