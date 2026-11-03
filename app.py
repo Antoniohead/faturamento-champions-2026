@@ -151,6 +151,7 @@ def carregar_eventos():
             "Valor Pago Equipe": val_pago_final,
             "Status Recebimento": st_rec,
             "Status Pagamento": st_pag,
+            "Status": d.get("status") or "Pendente",  # Campo de Status do Orçamento/OS
             "Lucro Real": lucro,
             "Lucro Miguel Araújo": lucro * 0.50,
             "Lucro Antonio Carlos": lucro * 0.50,
@@ -202,6 +203,7 @@ def salvar_evento_db(reg):
         "val_pago_equipe": safe_float(reg.get("Valor Pago Equipe")),
         "status_recebimento": str(reg.get("Status Recebimento") or "Pendente"),
         "status_pagamento": str(reg.get("Status Pagamento") or "Pendente"),
+        "status": str(reg.get("Status") or "Pendente"),
         "lucro_real": safe_float(reg.get("Lucro Real")),
         "lucro_miguel": safe_float(reg.get("Lucro Miguel Araújo")),
         "lucro_antonio": safe_float(reg.get("Lucro Antonio Carlos")),
@@ -244,6 +246,7 @@ def atualizar_evento_db(id_evento, reg):
         "val_pago_equipe": safe_float(reg.get("Valor Pago Equipe")),
         "status_recebimento": str(reg.get("Status Recebimento") or "Pendente"),
         "status_pagamento": str(reg.get("Status Pagamento") or "Pendente"),
+        "status": str(reg.get("Status") or "Pendente"),
         "lucro_real": safe_float(reg.get("Lucro Real")),
         "lucro_miguel": safe_float(reg.get("Lucro Miguel Araújo")),
         "lucro_antonio": safe_float(reg.get("Lucro Antonio Carlos")),
@@ -576,21 +579,29 @@ st.markdown("---")
 
 faturamentos = carregar_eventos()
 
-# --- PAINEL GERAL DE INDICADORES (FILTRO POR CLIENTE) ---
+# --- PAINEL GERAL DE INDICADORES (FILTRO POR CLIENTE E POR STATUS) ---
 if faturamentos:
     df_kpi_raw = pd.DataFrame(faturamentos)
     clientes_unicos = sorted(list(set(df_kpi_raw["Cliente"].dropna().tolist())))
     opcoes_filtro_cliente = ["Todos os Clientes (Consolidado Geral)"] + clientes_unicos
     
-    st.markdown("## 📊 Controle Financeiro por Cliente")
-    cliente_selecionado_kpi = st.selectbox("🔍 Selecione o Cliente para filtrar os indicadores:", opcoes_filtro_cliente)
+    st.markdown("## 📊 Controle Financeiro por Cliente e Status")
+    
+    col_flt1, col_flt2 = st.columns(2)
+    with col_flt1:
+        cliente_selecionado_kpi = st.selectbox("🔍 Selecione o Cliente para filtrar:", opcoes_filtro_cliente)
+    with col_flt2:
+        status_selecionado_kpi = st.selectbox("📌 Selecione o Status da O.S.:", ["Todos os Status", "Pendente", "Aprovado", "Rejeitado"])
+    
+    df_kpi = df_kpi_raw.copy()
     
     if cliente_selecionado_kpi != "Todos os Clientes (Consolidado Geral)":
-        df_kpi = df_kpi_raw[df_kpi_raw["Cliente"] == cliente_selecionado_kpi]
-        lbl_contexto = f"Cliente: {cliente_selecionado_kpi}"
-    else:
-        df_kpi = df_kpi_raw
-        lbl_contexto = "Consolidado Geral"
+        df_kpi = df_kpi[df_kpi["Cliente"] == cliente_selecionado_kpi]
+        
+    if status_selecionado_kpi != "Todos os Status":
+        df_kpi = df_kpi[df_kpi["Status"] == status_selecionado_kpi]
+
+    lbl_contexto = f"Cliente: {cliente_selecionado_kpi} | Status: {status_selecionado_kpi}"
 
     total_faturado = safe_float(df_kpi["Faturamento Bruto"].sum())
     total_custos_equipe = safe_float(df_kpi["Custos Operacionais + Logística"].sum())
@@ -645,6 +656,7 @@ with aba1:
             horario_montagem = st.text_input("Horário da Montagem", value="06h às 10h")
         with col3:
             equipe_tecnica = st.text_area("Descrição da Equipe Escalada (Uso Interno)", placeholder="Ex: 1 Tech Resolume, 1 Iluminação, 1 Som...")
+            status_inicial = st.selectbox("📌 Status Inicial do Orçamento / O.S.:", ["Pendente", "Aprovado", "Rejeitado"])
 
         st.markdown("### 🛠️ 2. Equipamentos Contratados")
         equipamentos_contrato = st.text_area("Equipamentos em Contrato", placeholder="Ex: Painéis LED, Processadores, Microfones...")
@@ -774,6 +786,7 @@ with aba1:
                 "Valor Pago Equipe": val_pago_equipe_init,
                 "Status Recebimento": st_rec,
                 "Status Pagamento": st_pag,
+                "Status": status_inicial,
                 "Lucro Real": lucro_real,
                 "Lucro Miguel Araújo": lucro_real * 0.50,
                 "Lucro Antonio Carlos": lucro_real * 0.50,
@@ -795,7 +808,7 @@ with aba2:
     else:
         idx_edit = st.selectbox(
             "Selecione o Evento para Gestão Financeira:", range(len(faturamentos)),
-            format_func=lambda x: f"ID #{faturamentos[x]['id']} - {faturamentos[x]['Cliente']} ({faturamentos[x]['Data Evento']})"
+            format_func=lambda x: f"ID #{faturamentos[x]['id']} - [{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} ({faturamentos[x]['Data Evento']})"
         )
         
         reg = faturamentos[idx_edit]
@@ -825,6 +838,11 @@ with aba2:
 
             with ce_col3:
                 e_equipe_tecnica = st.text_area("Descrição da Equipe Escalada (Uso Interno)", value=reg["Equipe Técnica"])
+                
+                opcoes_status = ["Pendente", "Aprovado", "Rejeitado"]
+                status_atual_reg = reg.get("Status", "Pendente")
+                idx_st = opcoes_status.index(status_atual_reg) if status_atual_reg in opcoes_status else 0
+                e_status = st.selectbox("📌 Status do Orçamento / O.S.:", opcoes_status, index=idx_st)
 
             st.markdown("#### 🛠️ 2. Equipamentos Contratados")
             e_equipamentos = st.text_area("Equipamentos em Contrato", value=reg["Equipamentos"])
@@ -1014,6 +1032,7 @@ with aba2:
                     "Valor Pago Equipe": total_pago_calculado,
                     "Status Recebimento": st_rec,
                     "Status Pagamento": st_pag,
+                    "Status": e_status,
                     "Lucro Real": novo_lucro,
                     "Lucro Miguel Araújo": novo_lucro * 0.50,
                     "Lucro Antonio Carlos": novo_lucro * 0.50,
@@ -1041,7 +1060,7 @@ with aba3:
         df_cal = pd.DataFrame(faturamentos)
         st.markdown("### 📋 Cronograma de Montagens e Eventos")
         
-        df_cal_display = df_cal[["Data Montagem", "Horário Montagem", "Data Evento", "Horário", "Cliente", "Complexo / Local", "Equipe Técnica"]].copy()
+        df_cal_display = df_cal[["Data Montagem", "Horário Montagem", "Data Evento", "Horário", "Cliente", "Complexo / Local", "Status", "Equipe Técnica"]].copy()
         st.dataframe(df_cal_display, use_container_width=True)
 
 # ABA 4: GERADOR DE RECIBOS DE CACHÊ / REEMBOLSO
@@ -1052,7 +1071,7 @@ with aba4:
     else:
         idx_rec_evt = st.selectbox(
             "Selecione o Evento referente ao Recibo:", range(len(faturamentos)),
-            format_func=lambda x: f"{faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
+            format_func=lambda x: f"[{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
         )
         evt_rec = faturamentos[idx_rec_evt]
         
@@ -1101,7 +1120,7 @@ with aba6:
     else:
         idx_wsp = st.selectbox(
             "Selecione o Evento para enviar o resumo ao cliente:", range(len(faturamentos)),
-            format_func=lambda x: f"{faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
+            format_func=lambda x: f"[{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
         )
         evt_wsp = faturamentos[idx_wsp]
         
@@ -1111,6 +1130,7 @@ with aba6:
 
 📅 *Data do Evento:* {evt_wsp['Data Evento']} ({evt_wsp['Horário']})
 📍 *Local:* {evt_wsp['Complexo / Local']}
+📌 *Status da O.S.:* {evt_wsp.get('Status', 'Pendente')}
 💵 *Valor Global:* R$ {evt_wsp['Faturamento Bruto']:,.2f}
 ⏳ *Saldo Pendente:* R$ {(evt_wsp['Faturamento Bruto'] - evt_wsp['Valor Recebido Cliente']):,.2f}
 
@@ -1133,7 +1153,7 @@ with aba7:
         with col_sel:
             evento_idx_pdf = st.selectbox(
                 "Selecione o Evento para gerar o PDF Comercial/Interno:", range(len(faturamentos)),
-                format_func=lambda x: f"{faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
+                format_func=lambda x: f"[{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
             )
         
         reg_sel = faturamentos[evento_idx_pdf]
@@ -1178,7 +1198,7 @@ with aba7:
 
         st.dataframe(
             df_full[[
-                "id", "Cliente", "Data Evento", "Complexo / Local", "Aprovado", "Val. Extra", "Custo Reembolsos", "Responsável Imposto", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
+                "id", "Cliente", "Data Evento", "Complexo / Local", "Status", "Aprovado", "Val. Extra", "Custo Reembolsos", "Responsável Imposto", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
                 "Status Recebimento", "Custos Operacionais + Logística", "Desc. Fornecedor Externo", "Custo Fornecedor Externo", "Valor Pago Equipe", "Falta Pagar (Equipe/Ext)", "Status Pagamento", "Lucro Real",
                 "Lucro Miguel Araújo", "Lucro Antonio Carlos"
             ]],
