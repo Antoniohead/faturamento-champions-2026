@@ -65,6 +65,12 @@ def safe_float(val):
     except (ValueError, TypeError):
         return 0.0
 
+# Formata valores para o padrão monetário brasileiro (R$ X.XXX,YY)
+def fmt_br(val):
+    v = safe_float(val)
+    s = f"{v:,.2f}"
+    return f"R$ {s.replace(',', 'X').replace('.', ',').replace('X', '.')}"
+
 def carregar_eventos():
     try:
         response = supabase.table("eventos").select("*").execute()
@@ -106,14 +112,14 @@ def carregar_eventos():
         if val_rec_final >= fat_bruto and fat_bruto > 0:
             st_rec = "Pago Total"
         elif val_rec_final > 0:
-            st_rec = f"Parcial (Falta R$ {falta_rec:,.2f})"
+            st_rec = f"Parcial (Falta {fmt_br(falta_rec)})"
         else:
             st_rec = "Pendente"
 
         if val_pago_final >= custos_tot and custos_tot > 0:
             st_pag = "Pago Total"
         elif val_pago_final > 0:
-            st_pag = f"Parcial (Falta R$ {falta_pag:,.2f})"
+            st_pag = f"Parcial (Falta {fmt_br(falta_pag)})"
         else:
             st_pag = "Pendente"
 
@@ -299,13 +305,13 @@ def gerar_pdf_recibo(favorecido, valor, servico_desc, cliente, data_evento):
     story.append(Paragraph("<b>RECIBO DE PAGAMENTO / RESSARCIMENTO</b>", title_style))
     story.append(Spacer(1, 20))
     
-    val_box = Table([[Paragraph(f"<b>VALOR TOTAL: R$ {valor:,.2f}</b>", ParagraphStyle('VBox', parent=title_style, fontSize=14, textColor=colors.HexColor("#FFD700")))]], colWidths=[520])
+    val_box = Table([[Paragraph(f"<b>VALOR TOTAL: {fmt_br(valor)}</b>", ParagraphStyle('VBox', parent=title_style, fontSize=14, textColor=colors.HexColor("#FFD700")))]], colWidths=[520])
     val_box.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 10), ('ALIGN', (0,0), (-1,-1), 'CENTER')]))
     story.append(val_box)
     story.append(Spacer(1, 20))
     
     texto_recibo = f"""
-    Recebi(emos) de <b>MIGUEL ARAÚJO PRODUÇÕES</b> a quantia de <b>R$ {valor:,.2f}</b>, referente ao pagamento por serviços prestados ou reembolso de despesas operacionais referentes ao evento do cliente <b>{cliente}</b> realizado na data de <b>{data_evento}</b>.
+    Recebi(emos) de <b>MIGUEL ARAÚJO PRODUÇÕES</b> a quantia de <b>{fmt_br(valor)}</b>, referente ao pagamento por serviços prestados ou reembolso de despesas operacionais referentes ao evento do cliente <b>{cliente}</b> realizado na data de <b>{data_evento}</b>.
     <br/><br/>
     <b>Descrição dos Serviços / Reembolso:</b><br/>
     {servico_desc}
@@ -328,7 +334,7 @@ def gerar_pdf_recibo(favorecido, valor, servico_desc, cliente, data_evento):
     buffer.seek(0)
     return buffer
 
-# GERADOR DE PDF DUAL DE ORÇAMENTO E CONTROLE (COM PROTEÇÃO NO ORÇAMENTO DO CLIENTE)
+# GERADOR DE PDF DUAL DE ORÇAMENTO E CONTROLE
 def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
@@ -399,7 +405,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
 
         dados_orc_resumo = [
             [Paragraph("ESCOPO BASE APROVADO", th_style), Paragraph("STATUS / DESCRIÇÃO", th_style), Paragraph("VALOR BASE (R$)", th_style)],
-            [Paragraph("Estrutura, Equipamentos e Serviço Base", td_style), Paragraph("Pacote Padrão Aprovado", td_style), Paragraph(f"R$ {val_base:,.2f}", td_bold)]
+            [Paragraph("Estrutura, Equipamentos e Serviço Base", td_style), Paragraph("Pacote Padrão Aprovado", td_style), Paragraph(fmt_br(val_base), td_bold)]
         ]
 
         if itens_extras and len(itens_extras) > 0:
@@ -409,20 +415,20 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
                 dados_orc_resumo.append([
                     Paragraph(f"➕ Extra: {desc}", td_style),
                     Paragraph("Item Solicitado Adicionalmente", td_style),
-                    Paragraph(f"R$ {val:,.2f}", td_bold)
+                    Paragraph(fmt_br(val), td_bold)
                 ])
 
             dados_orc_resumo.append([
                 Paragraph("<b>SUBTOTAL DE ADICIONAIS / EXTRAS</b>", th_style),
                 Paragraph("", th_style),
-                Paragraph(f"<b>R$ {val_extra_tot:,.2f}</b>", td_bold)
+                Paragraph(f"<b>{fmt_br(val_extra_tot)}</b>", td_bold)
             ])
 
         if resp_imposto == "Por Conta do Cliente":
             dados_orc_resumo.append([
                 Paragraph("<b>IMPOSTOS E ENCARGOS FISCAIS (10% NF)</b>", th_style),
                 Paragraph("Por conta do Cliente / Adicionado ao Total", td_style),
-                Paragraph(f"<b>R$ {val_imposto:,.2f}</b>", td_bold)
+                Paragraph(f"<b>{fmt_br(val_imposto)}</b>", td_bold)
             ])
 
         t_orc_resumo = Table(dados_orc_resumo, colWidths=[240, 180, 140])
@@ -446,7 +452,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
             for item in itens_extras:
                 desc = item.get("Descrição") or item.get("Descricao") or "Item Extra"
                 val = safe_float(item.get("Valor", 0.0))
-                dados_extras.append([Paragraph(str(desc), td_style), Paragraph(f"R$ {val:,.2f}", td_bold)])
+                dados_extras.append([Paragraph(str(desc), td_style), Paragraph(fmt_br(val), td_bold)])
 
             t_extras = Table(dados_extras, colWidths=[420, 140])
             t_extras.setStyle(TableStyle([
@@ -468,7 +474,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
             for f_item in fornecedores_list:
                 f_desc = f_item.get("Descrição") or "Fornecedor Externo"
                 f_val = safe_float(f_item.get("Valor", 0.0))
-                dados_forn.append([Paragraph(str(f_desc), td_style), Paragraph(f"R$ {f_val:,.2f}", td_bold)])
+                dados_forn.append([Paragraph(str(f_desc), td_style), Paragraph(fmt_br(f_val), td_bold)])
 
             t_forn = Table(dados_forn, colWidths=[420, 140])
             t_forn.setStyle(TableStyle([
@@ -489,9 +495,9 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
             dados_reemb = [[Paragraph("FAVORECIDO", th_style), Paragraph("DESCRIÇÃO / SOBRE O QUE É", th_style), Paragraph("VALOR (R$)", th_style)]]
             for r_item in reembolsos_pdf_list:
                 r_fav = r_item.get("Favorecido") or "Não informado"
-                r_desc = r_item.get("Descrição") or "Reembolso Operacional"
+                r_desc = r_item.get("Descrição") or r_item.get("Descrição / Comprovante") or "Reembolso Operacional"
                 r_val = safe_float(r_item.get("Valor", 0.0))
-                dados_reemb.append([Paragraph(str(r_fav), td_style), Paragraph(str(r_desc), td_style), Paragraph(f"R$ {r_val:,.2f}", td_bold)])
+                dados_reemb.append([Paragraph(str(r_fav), td_style), Paragraph(str(r_desc), td_style), Paragraph(fmt_br(r_val), td_bold)])
 
             t_reemb = Table(dados_reemb, colWidths=[160, 260, 140])
             t_reemb.setStyle(TableStyle([
@@ -508,17 +514,17 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(sec4_hdr)
         
         dados_sec4 = [
-            [Paragraph("Faturamento Bruto:", th_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", td_bold), Paragraph(f"Imposto NF ({resp_imposto}):", th_style), Paragraph(f"R$ {registro['10% NF']:,.2f}", td_style)],
-            [Paragraph("Custos Operacionais Totais:", th_style), Paragraph(f"R$ {registro['Custos Operacionais + Logística']:,.2f}", td_style), Paragraph("Total Reembolsos:", th_style), Paragraph(f"R$ {registro.get('Custo Reembolsos', 0.0):,.2f}", td_style)],
-            [Paragraph("<b>LUCRO REAL LÍQUIDO</b>", th_style), Paragraph(f"<b>R$ {registro['Lucro Real']:,.2f}</b>", td_bold), Paragraph("", th_style), Paragraph("", th_style)],
-            [Paragraph("<b>PARTE MIGUEL ARAÚJO (50%)</b>", th_style), Paragraph(f"<b>R$ {registro['Lucro Miguel Araújo']:,.2f}</b>", td_bold), Paragraph("<b>PARTE ANTONIO CARLOS (50%)</b>", th_style), Paragraph(f"<b>R$ {registro['Lucro Antonio Carlos']:,.2f}</b>", td_bold)]
+            [Paragraph("Faturamento Bruto:", th_style), Paragraph(fmt_br(registro['Faturamento Bruto']), td_bold), Paragraph(f"Imposto NF ({resp_imposto}):", th_style), Paragraph(fmt_br(registro['10% NF']), td_style)],
+            [Paragraph("Custos Operacionais Totais:", th_style), Paragraph(fmt_br(registro['Custos Operacionais + Logística']), td_style), Paragraph("Total Reembolsos:", th_style), Paragraph(fmt_br(registro.get('Custo Reembolsos', 0.0)), td_style)],
+            [Paragraph("<b>LUCRO REAL LÍQUIDO</b>", th_style), Paragraph(f"<b>{fmt_br(registro['Lucro Real'])}</b>", td_bold), Paragraph("", th_style), Paragraph("", th_style)],
+            [Paragraph("<b>PARTE MIGUEL ARAÚJO (50%)</b>", th_style), Paragraph(f"<b>{fmt_br(registro['Lucro Miguel Araújo'])}</b>", td_bold), Paragraph("<b>PARTE ANTONIO CARLOS (50%)</b>", th_style), Paragraph(f"<b>{fmt_br(registro['Lucro Antonio Carlos'])}</b>", td_bold)]
         ]
         t4 = Table(dados_sec4, colWidths=[140, 140, 140, 140])
         t4.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF6EE")), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#C5A059")), ('PADDING', (0,0), (-1,-1), 5)]))
         story.append(t4)
         story.append(Spacer(1, 12))
 
-    val_box = Table([[Paragraph(f"VALOR FINANCEIRO GLOBAL ({registro['Cliente']}):", val_title_style), Paragraph(f"R$ {registro['Faturamento Bruto']:,.2f}", val_num_style)]], colWidths=[360, 200])
+    val_box = Table([[Paragraph(f"VALOR FINANCEIRO GLOBAL ({registro['Cliente']}):", val_title_style), Paragraph(fmt_br(registro['Faturamento Bruto']), val_num_style)]], colWidths=[360, 200])
     val_box.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 10), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
     story.append(val_box)
 
@@ -606,7 +612,6 @@ if faturamentos:
 
     lbl_contexto = f"Cliente: {cliente_selecionado_kpi} | Status: {status_selecionado_kpi}"
 
-    # Separando cálculos entre Aprovados (Garantido) e Pendentes (Em Negociação)
     df_aprovados = df_kpi[df_kpi["Status"] == "Aprovado"]
     df_pendentes = df_kpi[df_kpi["Status"] == "Pendente"]
 
@@ -628,16 +633,16 @@ if faturamentos:
     st.caption(f"Exibindo dados de: **{lbl_contexto}** ({len(df_kpi)} evento(s) encontrado(s))")
 
     kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
-    kpi_col1.metric("🟢 Faturado (Aprovado)", f"R$ {total_faturado_aprovado:,.2f}")
-    kpi_col2.metric("🟡 Em Negociação (Pendente)", f"R$ {total_faturado_pendente:,.2f}")
-    kpi_col3.metric("✅ Total Recebido (Cliente)", f"R$ {total_recebido:,.2f}")
-    kpi_col4.metric("📈 Lucro Líquido Real", f"R$ {lucro_liquido_total:,.2f}")
+    kpi_col1.metric("🟢 Faturado (Aprovado)", fmt_br(total_faturado_aprovado))
+    kpi_col2.metric("🟡 Em Negociação (Pendente)", fmt_br(total_faturado_pendente))
+    kpi_col3.metric("✅ Total Recebido (Cliente)", fmt_br(total_recebido))
+    kpi_col4.metric("📈 Lucro Líquido Real", fmt_br(lucro_liquido_total))
 
     kpi_col5, kpi_col6, kpi_col7, kpi_col8 = st.columns(4)
-    kpi_col5.metric("👥 Custo Total Operacional", f"R$ {total_custos_equipe:,.2f}")
-    kpi_col6.metric("💸 Total Já Pago (Equipe/Ext)", f"R$ {total_pago_equipe:,.2f}")
-    kpi_col7.metric("⚠️ A Pagar Pessoas/Serviços", f"R$ {total_falta_pagar_equipe:,.2f}")
-    kpi_col8.metric("🧾 Impostos Reservados (10% NF)", f"R$ {total_impostos:,.2f}")
+    kpi_col5.metric("👥 Custo Total Operacional", fmt_br(total_custos_equipe))
+    kpi_col6.metric("💸 Total Já Pago (Equipe/Ext)", fmt_br(total_pago_equipe))
+    kpi_col7.metric("⚠️ A Pagar Pessoas/Serviços", fmt_br(total_falta_pagar_equipe))
+    kpi_col8.metric("🧾 Impostos Reservados (10% NF)", fmt_br(total_impostos))
 
     st.markdown("---")
 
@@ -720,7 +725,7 @@ with aba1:
             faturamento_bruto_calc = base_e_extra
 
         with col_v3:
-            st.success(f"**Faturamento Bruto Final:** R$ {faturamento_bruto_calc:,.2f}\n• Base: R$ {val_aprovado:,.2f} | Extras: R$ {val_extra_total:,.2f}\n• Imposto (10% NF): R$ {imposto_nf_calc:,.2f} ({resp_imposto})")
+            st.success(f"**Faturamento Bruto Final:** {fmt_br(faturamento_bruto_calc)}\n• Base: {fmt_br(val_aprovado)} | Extras: {fmt_br(val_extra_total)}\n• Imposto (10% NF): {fmt_br(imposto_nf_calc)} ({resp_imposto})")
 
         st.markdown("### 👥 6. Custos: Equipe Técnica, Logística & Fornecedores")
         col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns(5)
@@ -922,7 +927,7 @@ with aba2:
                 e_fat_bruto_calc = e_base_e_extra
 
             with col_ev3:
-                st.info(f"Faturamento Bruto Total: **R$ {e_fat_bruto_calc:,.2f}**\n• NF: R$ {e_imposto_nf_calc:,.2f} ({e_resp_imposto})")
+                st.info(f"Faturamento Bruto Total: **{fmt_br(e_fat_bruto_calc)}**\n• NF: {fmt_br(e_imposto_nf_calc)} ({e_resp_imposto})")
 
             st.markdown("#### 👥 6. Custos: Equipe Técnica, Logística & Cachês")
             col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
@@ -965,7 +970,7 @@ with aba2:
             total_rec_calculado = safe_float(df_hist_rec_updated["Valor"].sum()) if not df_hist_rec_updated.empty else 0.0
             falta_receber_calc = e_fat_bruto_calc - total_rec_calculado
             
-            st.warning(f"**Situação de Caixa (Cliente):** Total Faturado: **R$ {e_fat_bruto_calc:,.2f}** | Já Recebido: **R$ {total_rec_calculado:,.2f}** | ⏳ **FALTA RECEBER: R$ {falta_receber_calc:,.2f}**")
+            st.warning(f"**Situação de Caixa (Cliente):** Total Faturado: **{fmt_br(e_fat_bruto_calc)}** | Já Recebido: **{fmt_br(total_rec_calculado)}** | ⏳ **FALTA RECEBER: {fmt_br(falta_receber_calc)}**")
 
             st.markdown("---")
             st.markdown("#### 💸 8. Extrato e Lançamentos de Pagamentos Parciais (Equipe / Fornecedores / Reembolsos)")
@@ -990,7 +995,7 @@ with aba2:
             total_pago_calculado = safe_float(df_hist_pag_updated["Valor"].sum()) if not df_hist_pag_updated.empty else 0.0
             falta_pagar_calc = novos_custos_totais - total_pago_calculado
 
-            st.warning(f"**Situação de Caixa (Equipe/Fornecedores):** Total Custos: **R$ {novos_custos_totais:,.2f}** | Já Pago: **R$ {total_pago_calculado:,.2f}** | ⚠️ **FALTA PAGAR: R$ {falta_pagar_calc:,.2f}**")
+            st.warning(f"**Situação de Caixa (Equipe/Fornecedores):** Total Custos: **{fmt_br(novos_custos_totais)}** | Já Pago: **{fmt_br(total_pago_calculado)}** | ⚠️ **FALTA PAGAR: {fmt_br(falta_pagar_calc)}**")
 
             e_obs = st.text_area("Observações Gerais do Evento", value=reg["Observações"])
 
@@ -1017,14 +1022,14 @@ with aba2:
                 if total_rec_calculado >= e_fat_bruto_calc and e_fat_bruto_calc > 0:
                     st_rec = "Pago Total"
                 elif total_rec_calculado > 0:
-                    st_rec = f"Parcial (Falta R$ {falta_receber_calc:,.2f})"
+                    st_rec = f"Parcial (Falta {fmt_br(falta_receber_calc)})"
                 else:
                     st_rec = "Pendente"
 
                 if total_pago_calculado >= novos_custos_totais and novos_custos_totais > 0:
                     st_pag = "Pago Total"
                 elif total_pago_calculado > 0:
-                    st_pag = f"Parcial (Falta R$ {falta_pagar_calc:,.2f})"
+                    st_pag = f"Parcial (Falta {fmt_br(falta_pagar_calc)})"
                 else:
                     st_pag = "Pendente"
 
@@ -1159,9 +1164,9 @@ with aba6:
 📅 *Data do Evento:* {evt_wsp['Data Evento']} ({evt_wsp['Horário']})
 📍 *Local:* {evt_wsp['Complexo / Local']}
 📌 *Status da O.S.:* {evt_wsp.get('Status', 'Pendente')}
-💵 *Valor Global:* R$ {evt_wsp['Faturamento Bruto']:,.2f}
-📄 *NF Emitida:* {evt_wsp.get('Numero NF', 'Não emitida')} (R$ {safe_float(evt_wsp.get('Valor NF', 0)):,.2f})
-⏳ *Saldo Pendente:* R$ {(evt_wsp['Faturamento Bruto'] - evt_wsp['Valor Recebido Cliente']):,.2f}
+💵 *Valor Global:* {fmt_br(evt_wsp['Faturamento Bruto'])}
+📄 *NF Emitida:* {evt_wsp.get('Numero NF', 'Não emitida')} ({fmt_br(safe_float(evt_wsp.get('Valor NF', 0)))})
+⏳ *Saldo Pendente:* {fmt_br(evt_wsp['Faturamento Bruto'] - evt_wsp['Valor Recebido Cliente'])}
 
 Permanecemos à disposição!
 *Miguel Araújo Produções*"""
