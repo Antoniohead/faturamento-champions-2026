@@ -65,7 +65,6 @@ def safe_float(val):
     except (ValueError, TypeError):
         return 0.0
 
-# Formata valores para o padrão monetário brasileiro (R$ X.XXX,YY)
 def fmt_br(val):
     v = safe_float(val)
     s = f"{v:,.2f}"
@@ -143,7 +142,7 @@ def carregar_eventos():
             "Custo Iluminação": safe_float(d.get("custo_iluminacao")),
             "Custo Sonorização": safe_float(d.get("custo_sonorizacao")),
             "Custo Diretor": safe_float(d.get("custo_diretor")),
-            "Custo Logística": safe_float(d.get("custo_logistica")),
+            "Custo Logística": safe_float(d.get("custo_logística")),
             "Fornecedores Externos": forn_ext_list,
             "Custo Fornecedor Externo": custo_forn_total,
             "Desc. Fornecedor Externo": ", ".join([str(f.get("Descrição", "")) for f in forn_ext_list]),
@@ -178,7 +177,6 @@ def carregar_eventos():
     eventos.sort(key=extrair_data_obj, reverse=True)
     return eventos
 
-# --- FUNÇÕES DE BD PARA FORNECEDORES E ABATIMENTOS ---
 def carregar_fornecedores():
     try:
         response = supabase.table("fornecedores").select("*").execute()
@@ -340,7 +338,6 @@ def gerar_excel_fornecedores(dados_forn, lista_pagamentos):
     output.seek(0)
     return output
 
-# GERADOR DE RECIBO DE PAGAMENTO / CACHÊ / REEMBOLSO
 def gerar_pdf_recibo(favorecido, valor, servico_desc, cliente, data_evento):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
@@ -389,7 +386,6 @@ def gerar_pdf_recibo(favorecido, valor, servico_desc, cliente, data_evento):
     buffer.seek(0)
     return buffer
 
-# GERADOR DE PDF DUAL DE ORÇAMENTO E CONTROLE
 def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
@@ -617,8 +613,25 @@ st.markdown("""
     input, textarea, select, div[role="combobox"] { color: #FAF6EE !important; background-color: #2A201C !important; -webkit-text-fill-color: #FAF6EE !important; }
     div[data-baseweb="input"], div[data-baseweb="textarea"], div[data-baseweb="select"] { background-color: #2A201C !important; border: 1px solid #C5A059 !important; border-radius: 6px !important; }
     ::placeholder { color: #A09080 !important; opacity: 0.8 !important; }
-    .stButton>button { background: linear-gradient(135deg, #C5A059 0%, #9A7B3E 100%); color: #1A1412 !important; font-weight: bold; border-radius: 8px; border: none; padding: 0.6rem 1rem; transition: all 0.3s ease; }
-    .stButton>button:hover { background: linear-gradient(135deg, #00E676 0%, #00C853 100%); color: #1A1412 !important; box-shadow: 0 0 12px rgba(0, 230, 118, 0.4); }
+    
+    /* Correção de alta visibilidade e contraste para botões normais e de download */
+    .stButton>button, div.stDownloadButton>button { 
+        background: linear-gradient(135deg, #C5A059 0%, #9A7B3E 100%) !important; 
+        color: #1A1412 !important; 
+        font-weight: bold !important; 
+        border-radius: 8px; 
+        border: none; 
+        padding: 0.6rem 1rem; 
+    }
+    .stButton>button:hover, div.stDownloadButton>button:hover { 
+        background: linear-gradient(135deg, #00E676 0%, #00C853 100%) !important; 
+        color: #1A1412 !important; 
+    }
+    div.stDownloadButton>button p, div.stButton>button p, div.stDownloadButton>button span, div.stButton>button span {
+        color: #1A1412 !important;
+        font-weight: bold !important;
+    }
+
     div[data-testid="stMetricValue"] { color: #C5A059 !important; font-weight: bold; }
     label, p, span { color: #FAF6EE !important; }
     h1, h2, h3 { color: #C5A059 !important; }
@@ -681,11 +694,9 @@ if faturamentos:
     
     total_recebido = safe_float(df_kpi["Valor Recebido Cliente"].sum())
     
-    # Total já pago consolidando os abatimentos sem distorcer o teto dos custos operacionais
     total_abatimentos_geral = sum(safe_float(p.get("valor", 0.0)) for p in pagamentos_fornecedores_lista)
     total_pago_equipe = safe_float(df_kpi["Valor Pago Equipe"].sum()) + total_abatimentos_geral
     
-    # O "A Pagar" não pode ficar negativo de forma ilógica; se pagou a mais (crédito), exibe R$ 0,00 a pagar e sinaliza o crédito nos fornecedores
     falta_pagar_bruta = total_custos_equipe - total_pago_equipe
     total_falta_pagar_equipe = max(0.0, falta_pagar_bruta)
     
@@ -1305,7 +1316,6 @@ with aba8:
     
     col_cad1, col_cad2 = st.columns(2)
     
-    # 1. NOVO FORNECEDOR
     with col_cad1:
         with st.expander("➕ Cadastrar Novo Fornecedor ou Prestador", expanded=False):
             with st.form("form_novo_fornecedor"):
@@ -1332,7 +1342,6 @@ with aba8:
                         st.success("✅ Fornecedor cadastrado com sucesso!")
                         st.rerun()
 
-    # 2. LANÇAR ABATIMENTO / PAGAMENTO PICADO
     with col_cad2:
         with st.expander("💸 Lançar Abatimento / Pagamento Parcial", expanded=True):
             if not fornecedores_cadastrados:
@@ -1414,17 +1423,15 @@ with aba8:
         df_forn_view = pd.DataFrame(dados_forn_tabela)
         st.dataframe(df_forn_view, use_container_width=True)
 
-        # BOTÃO DE EXPORTAR FORNECEDORES E PAGAMENTOS EM EXCEL
         excel_forn_bytes = gerar_excel_fornecedores(dados_forn_tabela, pagamentos_fornecedores_lista)
         st.download_button(
-            "📥 Baixar Planilha de Fornecedores e Pagamentos (.xlsx)",
+            "📥 Baixar Planilha de Fornecedores e Pagamentos em Excel (.xlsx)",
             data=excel_forn_bytes,
             file_name=f"Controle_Fornecedores_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
 
-        # SEÇÃO DE VER HISTÓRICO DE ABATIMENTOS DE UM FORNECEDOR
         st.markdown("---")
         st.markdown("### 📜 Extrato Detalhado de Abatimentos por Fornecedor")
         
@@ -1454,8 +1461,8 @@ with aba8:
                 )
                 
                 with st.expander("🗑️ Cancelar / Excluir um Lançamento de Abatimento"):
-                    id_pag_excluir = st.number_input("Digite o ID do lançamento a excluir:", min_value=1, step=1)
-                    if st.button("Remover Abatimento"):
+                    id_pag_excluir = st.number_input("Digite o ID do lançamento a excluir:", min_value=1, step=1, key="del_pag_inp")
+                    if st.button("Remover Abatimento", key="btn_del_pag"):
                         deletar_pagamento_fornecedor_db(id_pag_excluir)
                         st.warning("🗑️ Lançamento de abatimento removido!")
                         st.rerun()
@@ -1468,7 +1475,7 @@ with aba8:
             format_func=lambda x: f"ID #{x.get('id')} - {x.get('nome')} ({x.get('categoria')})",
             key="sel_excluir_forn"
         )
-        if st.button("❌ Excluir Cadastro de Fornecedor"):
+        if st.button("❌ Excluir Cadastro de Fornecedor", key="btn_del_forn"):
             if forn_para_excluir:
                 deletar_fornecedor_db(forn_para_excluir.get("id"))
                 st.warning(f"🗑️ Fornecedor {forn_para_excluir.get('nome')} removido com sucesso!")
