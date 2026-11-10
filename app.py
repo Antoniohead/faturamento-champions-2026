@@ -85,7 +85,6 @@ def carregar_eventos():
         imp_nf = safe_float(d.get("imposto_nf"))
         custos_tot = safe_float(d.get("custos_total"))
         
-        # Lucro Real Líquido Correto por Evento: Bruto - Imposto - Custos Operacionais
         lucro = safe_float(d.get("lucro_real")) if d.get("lucro_real") is not None else (fat_bruto - imp_nf - custos_tot)
 
         forn_ext_list = parse_json_safely(d.get("fornecedores_externos"))
@@ -326,6 +325,18 @@ def gerar_excel_backup(eventos):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export_clean.to_excel(writer, index=False, sheet_name='Eventos_Backup')
+    output.seek(0)
+    return output
+
+def gerar_excel_fornecedores(dados_forn, lista_pagamentos):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_f = pd.DataFrame(dados_forn)
+        df_f.to_excel(writer, index=False, sheet_name='Fornecedores_Saldos')
+        
+        if lista_pagamentos:
+            df_p = pd.DataFrame(lista_pagamentos)
+            df_p.to_excel(writer, index=False, sheet_name='Extrato_Pagamentos')
     output.seek(0)
     return output
 
@@ -634,7 +645,7 @@ faturamentos = carregar_eventos()
 fornecedores_cadastrados = carregar_fornecedores()
 pagamentos_fornecedores_lista = carregar_pagamentos_fornecedores()
 
-# --- PAINEL GERAL DE INDICADORES (COM SEPARAÇÃO PENDENTE X APROVADO) ---
+# --- PAINEL GERAL DE INDICADORES (COM TRATAMENTO DE CRÉDITO) ---
 if faturamentos:
     df_kpi_raw = pd.DataFrame(faturamentos)
     clientes_unicos = sorted(list(set(df_kpi_raw["Cliente"].dropna().tolist())))
@@ -669,12 +680,14 @@ if faturamentos:
     total_impostos = safe_float(df_kpi["10% NF"].sum())
     
     total_recebido = safe_float(df_kpi["Valor Recebido Cliente"].sum())
-    total_falta_receber = total_faturado_geral - total_recebido
     
-    # Total já pago consolidando os abatimentos diretos da tabela pagamentos_fornecedores
+    # Total já pago consolidando os abatimentos sem distorcer o teto dos custos operacionais
     total_abatimentos_geral = sum(safe_float(p.get("valor", 0.0)) for p in pagamentos_fornecedores_lista)
     total_pago_equipe = safe_float(df_kpi["Valor Pago Equipe"].sum()) + total_abatimentos_geral
-    total_falta_pagar_equipe = total_custos_equipe - total_pago_equipe
+    
+    # O "A Pagar" não pode ficar negativo de forma ilógica; se pagou a mais (crédito), exibe R$ 0,00 a pagar e sinaliza o crédito nos fornecedores
+    falta_pagar_bruta = total_custos_equipe - total_pago_equipe
+    total_falta_pagar_equipe = max(0.0, falta_pagar_bruta)
     
     lucro_liquido_aprovado = safe_float(df_aprovados["Lucro Real"].sum())
     lucro_liquido_total = safe_float(df_kpi["Lucro Real"].sum())
@@ -690,7 +703,10 @@ if faturamentos:
     kpi_col5, kpi_col6, kpi_col7, kpi_col8 = st.columns(4)
     kpi_col5.metric("👥 Custo Total Operacional", fmt_br(total_custos_equipe))
     kpi_col6.metric("💸 Total Já Pago (Equipe/Ext)", fmt_br(total_pago_equipe))
-    kpi_col7.metric("⚠️ A Pagar Pessoas/Serviços", fmt_br(total_falta_pagar_equipe))
+    
+    delta_pagamento = f"Crédito Pago a Maior: {fmt_br(abs(falta_pagar_bruta))}" if falta_pagar_bruta < 0 else None
+    kpi_col7.metric("⚠️ A Pagar Pessoas/Serviços", fmt_br(total_falta_pagar_equipe), delta=delta_pagamento, delta_color="inverse")
+    
     kpi_col8.metric("🧾 Impostos Reservados (10% NF)", fmt_br(total_impostos))
 
     st.markdown("---")
@@ -1283,7 +1299,7 @@ with aba7:
             use_container_width=True
         )
 
-# ABA 8: FORNECEDORES & CONTAS A PAGAR (COM ABATIMENTOS E SALDO DEVEDOR / CRÉDITO)
+# ABA 8: FORNECEDORES & CONTAS A PAGAR (COM ABATIMENTOS, SALDO DEVEDOR / CRÉDITO E EXPORTAÇÃO EXCEL)
 with aba8:
     st.subheader("🌐 Gestão de Fornecedores & Lançamento de Abatimentos")
     
@@ -1359,25 +1375,21 @@ with aba8:
             f_id = forn.get("id")
             nome_f = forn.get("nome", "")
             
-            # Soma contratada dos eventos
             total_contratado_f = 0.0
             for ev in faturamentos:
                 for fx in ev.get("Fornecedores Externos", []):
                     if nome_f.lower() in str(fx.get("Descrição", "")).lower():
                         total_contratado_f += safe_float(fx.get("Valor", 0))
 
-            # Soma dos abatimentos diretos cadastrados
             pagamentos_diretos = [p for p in pagamentos_fornecedores_lista if p.get("fornecedor_id") == f_id]
             total_abatido_direto = sum(safe_float(p.get("valor", 0.0)) for p in pagamentos_diretos)
 
-            # Cálculo do Saldo Devedor ou Crédito (Saldo a Favor)
             diferenca = total_contratado_f - total_abatido_direto
             
             if diferenca > 0:
                 saldo_devedor_str = fmt_br(diferenca)
                 status_saldo = "🔴 Em Aberto"
             elif diferenca < 0:
-                # Pagou a mais! Exibe como Crédito / Saldo a Favor
                 saldo_devedor_str = f"Crédito: {fmt_br(abs(diferenca))}"
                 status_saldo = "🔵 Crédito a Favor"
             else:
@@ -1401,6 +1413,16 @@ with aba8:
 
         df_forn_view = pd.DataFrame(dados_forn_tabela)
         st.dataframe(df_forn_view, use_container_width=True)
+
+        # BOTÃO DE EXPORTAR FORNECEDORES E PAGAMENTOS EM EXCEL
+        excel_forn_bytes = gerar_excel_fornecedores(dados_forn_tabela, pagamentos_fornecedores_lista)
+        st.download_button(
+            "📥 Baixar Planilha de Fornecedores e Pagamentos (.xlsx)",
+            data=excel_forn_bytes,
+            file_name=f"Controle_Fornecedores_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
 
         # SEÇÃO DE VER HISTÓRICO DE ABATIMENTOS DE UM FORNECEDOR
         st.markdown("---")
@@ -1431,7 +1453,6 @@ with aba8:
                     use_container_width=True
                 )
                 
-                # Opção para excluir lançamento incorreto
                 with st.expander("🗑️ Cancelar / Excluir um Lançamento de Abatimento"):
                     id_pag_excluir = st.number_input("Digite o ID do lançamento a excluir:", min_value=1, step=1)
                     if st.button("Remover Abatimento"):
