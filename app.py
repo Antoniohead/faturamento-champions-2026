@@ -84,6 +84,8 @@ def carregar_eventos():
         fat_bruto = safe_float(d.get("faturamento_bruto"))
         imp_nf = safe_float(d.get("imposto_nf"))
         custos_tot = safe_float(d.get("custos_total"))
+        
+        # Lucro Real Líquido Correto por Evento: Bruto - Imposto - Custos Operacionais
         lucro = safe_float(d.get("lucro_real")) if d.get("lucro_real") is not None else (fat_bruto - imp_nf - custos_tot)
 
         forn_ext_list = parse_json_safely(d.get("fornecedores_externos"))
@@ -177,6 +179,7 @@ def carregar_eventos():
     eventos.sort(key=extrair_data_obj, reverse=True)
     return eventos
 
+# --- FUNÇÕES DE BD PARA FORNECEDORES E ABATIMENTOS ---
 def carregar_fornecedores():
     try:
         response = supabase.table("fornecedores").select("*").execute()
@@ -197,6 +200,26 @@ def salvar_fornecedor_db(reg):
 
 def deletar_fornecedor_db(id_forn):
     supabase.table("fornecedores").delete().eq("id", id_forn).execute()
+
+def carregar_pagamentos_fornecedores():
+    try:
+        response = supabase.table("pagamentos_fornecedores").select("*").execute()
+        return response.data or []
+    except Exception:
+        return []
+
+def registrar_abatimento_fornecedor_db(fornecedor_id, data_pag, valor, forma, obs):
+    payload = {
+        "fornecedor_id": int(fornecedor_id),
+        "data_pagamento": str(data_pag),
+        "valor": safe_float(valor),
+        "forma_pagamento": str(forma),
+        "observacao": str(obs)
+    }
+    supabase.table("pagamentos_fornecedores").insert(payload).execute()
+
+def deletar_pagamento_fornecedor_db(id_pag):
+    supabase.table("pagamentos_fornecedores").delete().eq("id", id_pag).execute()
 
 def salvar_evento_db(reg):
     payload = {
@@ -609,6 +632,7 @@ st.markdown("---")
 
 faturamentos = carregar_eventos()
 fornecedores_cadastrados = carregar_fornecedores()
+pagamentos_fornecedores_lista = carregar_pagamentos_fornecedores()
 
 # --- PAINEL GERAL DE INDICADORES (COM SEPARAÇÃO PENDENTE X APROVADO) ---
 if faturamentos:
@@ -650,6 +674,8 @@ if faturamentos:
     total_pago_equipe = safe_float(df_kpi["Valor Pago Equipe"].sum())
     total_falta_pagar_equipe = total_custos_equipe - total_pago_equipe
     
+    # Cálculo corrigido: Lucro Real apenas dos Aprovados vs Total Geral
+    lucro_liquido_aprovado = safe_float(df_aprovados["Lucro Real"].sum())
     lucro_liquido_total = safe_float(df_kpi["Lucro Real"].sum())
 
     st.caption(f"Exibindo dados de: **{lbl_contexto}** ({len(df_kpi)} evento(s) encontrado(s))")
@@ -658,7 +684,7 @@ if faturamentos:
     kpi_col1.metric("🟢 Faturado (Aprovado)", fmt_br(total_faturado_aprovado))
     kpi_col2.metric("🟡 Em Negociação (Pendente)", fmt_br(total_faturado_pendente))
     kpi_col3.metric("✅ Total Recebido (Cliente)", fmt_br(total_recebido))
-    kpi_col4.metric("📈 Lucro Líquido Real", fmt_br(lucro_liquido_total))
+    kpi_col4.metric("📈 Lucro Líquido (Aprovados)", fmt_br(lucro_liquido_aprovado), delta=f"Total c/ Pendentes: {fmt_br(lucro_liquido_total)}")
 
     kpi_col5, kpi_col6, kpi_col7, kpi_col8 = st.columns(4)
     kpi_col5.metric("👥 Custo Total Operacional", fmt_br(total_custos_equipe))
@@ -791,10 +817,8 @@ with aba1:
         reembolsos_novo = df_reemb_edit.to_dict('records') if not df_reemb_edit.empty else []
         total_custos_op = custo_resolume + custo_iluminacao + custo_sonorizacao + custo_diretor + custo_logistica + custo_externo_total + val_reembolso_total
         
-        if resp_imposto == "Por Conta do Cliente":
-            lucro_real = (faturamento_bruto_calc - imposto_nf_calc) - imposto_nf_calc - total_custos_op
-        else:
-            lucro_real = faturamento_bruto_calc - imposto_nf_calc - total_custos_op
+        # Cálculo correto do lucro real sem dupla subtração
+        lucro_real = faturamento_bruto_calc - imposto_nf_calc - total_custos_op
 
         st_rec = "Pago Total" if val_recebido_init >= faturamento_bruto_calc and faturamento_bruto_calc > 0 else ("Parcial" if val_recebido_init > 0 else "Pendente")
         st_pag = "Pago Total" if val_pago_equipe_init >= total_custos_op and total_custos_op > 0 else ("Parcial" if val_pago_equipe_init > 0 else "Pendente")
@@ -1037,10 +1061,8 @@ with aba2:
                 hist_rec_updated_list = df_hist_rec_updated.to_dict('records') if not df_hist_rec_updated.empty else []
                 hist_pag_updated_list = df_hist_pag_updated.to_dict('records') if not df_hist_pag_updated.empty else []
 
-                if e_resp_imposto == "Por Conta do Cliente":
-                    novo_lucro = (e_fat_bruto_calc - e_imposto_nf_calc) - e_imposto_nf_calc - novos_custos_totais
-                else:
-                    novo_lucro = e_fat_bruto_calc - e_imposto_nf_calc - novos_custos_totais
+                # Cálculo correto do lucro real sem dupla subtração
+                novo_lucro = e_fat_bruto_calc - e_imposto_nf_calc - novos_custos_totais
 
                 if total_rec_calculado >= e_fat_bruto_calc and e_fat_bruto_calc > 0:
                     st_rec = "Pago Total"
@@ -1262,83 +1284,157 @@ with aba7:
             use_container_width=True
         )
 
-# ABA 8: FORNECEDORES & CONTAS A PAGAR
+# ABA 8: FORNECEDORES & CONTAS A PAGAR (COM ABATIMENTOS E SALDO DEVEDOR)
 with aba8:
-    st.subheader("🌐 Gestão de Fornecedores e Contas a Pagar")
+    st.subheader("🌐 Gestão de Fornecedores & Lançamento de Abatimentos")
     
-    with st.expander("➕ Cadastrar Novo Fornecedor ou Prestador de Serviço", expanded=False):
-        with st.form("form_novo_fornecedor"):
-            f_nome = st.text_input("Nome do Fornecedor / Empresa", placeholder="Ex: Locadora de Equipamentos X, Técnico Y")
-            f_cat = st.selectbox("Categoria", ["Equipamentos / LED", "Serviço Técnico / Cachê", "Logística / Frete", "Outros"])
-            f_tel = st.text_input("Telefone / Contato", placeholder="Ex: (11) 99999-9999")
-            f_email = st.text_input("E-mail", placeholder="contato@fornecedor.com")
-            f_banco = st.text_area("Dados Bancários / Chave Pix", placeholder="Banco, Agência, Conta, Pix...")
-            f_obs = st.text_area("Observações sobre o Fornecedor")
-            
-            btn_salvar_forn = st.form_submit_button("💾 Salvar Fornecedor", use_container_width=True)
-            if btn_salvar_forn:
-                if not f_nome:
-                    st.error("O nome do fornecedor é obrigatório.")
-                else:
-                    salvar_fornecedor_db({
-                        "nome": f_nome,
-                        "categoria": f_cat,
-                        "telefone": f_tel,
-                        "email": f_email,
-                        "dados_bancarios": f_banco,
-                        "observacoes": f_obs
-                    })
-                    st.success("✅ Fornecedor cadastrado com sucesso!")
-                    st.rerun()
+    col_cad1, col_cad2 = st.columns(2)
+    
+    # 1. NOVO FORNECEDOR
+    with col_cad1:
+        with st.expander("➕ Cadastrar Novo Fornecedor ou Prestador", expanded=False):
+            with st.form("form_novo_fornecedor"):
+                f_nome = st.text_input("Nome do Fornecedor / Empresa", placeholder="Ex: Locadora X, Técnico Y")
+                f_cat = st.selectbox("Categoria", ["Equipamentos / LED", "Serviço Técnico / Cachê", "Logística / Frete", "Outros"])
+                f_tel = st.text_input("Telefone / Contato", placeholder="Ex: (11) 99999-9999")
+                f_email = st.text_input("E-mail", placeholder="contato@fornecedor.com")
+                f_banco = st.text_area("Dados Bancários / Chave Pix", placeholder="Banco, Agência, Conta, Pix...")
+                f_obs = st.text_area("Observações sobre o Fornecedor")
+                
+                btn_salvar_forn = st.form_submit_button("💾 Salvar Fornecedor", use_container_width=True)
+                if btn_salvar_forn:
+                    if not f_nome:
+                        st.error("O nome do fornecedor é obrigatório.")
+                    else:
+                        salvar_fornecedor_db({
+                            "nome": f_nome,
+                            "categoria": f_cat,
+                            "telefone": f_tel,
+                            "email": f_email,
+                            "dados_bancarios": f_banco,
+                            "observacoes": f_obs
+                        })
+                        st.success("✅ Fornecedor cadastrado com sucesso!")
+                        st.rerun()
+
+    # 2. LANÇAR ABATIMENTO / PAGAMENTO PICADO
+    with col_cad2:
+        with st.expander("💸 Lançar Abatimento / Pagamento Parcial", expanded=True):
+            if not fornecedores_cadastrados:
+                st.info("Cadastre um fornecedor primeiro para poder lançar pagamentos.")
+            else:
+                with st.form("form_novo_abatimento"):
+                    forn_abat = st.selectbox(
+                        "Selecione o Fornecedor para abater:",
+                        options=fornecedores_cadastrados,
+                        format_func=lambda x: f"{x.get('nome')} ({x.get('categoria')})"
+                    )
+                    dt_abat = st.date_input("Data do Pagamento / Abatimento", datetime.now())
+                    val_abat = st.number_input("Valor Pago a Abater (R$)", min_value=0.0, step=50.0)
+                    forma_abat = st.selectbox("Forma de Pagamento", ["Pix", "Transferência / TED", "Dinheiro", "Boleto", "Outro"])
+                    obs_abat = st.text_input("Observação / Referência", placeholder="Ex: Pagamento parcial ref. evento de 15/10")
+
+                    btn_lancar_abat = st.form_submit_button("🟢 Abater do Saldo Devedor", use_container_width=True)
+                    if btn_lancar_abat:
+                        if val_abat <= 0:
+                            st.error("Por favor, digite um valor válido maior que zero.")
+                        else:
+                            registrar_abatimento_fornecedor_db(
+                                fornecedor_id=forn_abat.get("id"),
+                                data_pag=dt_abat.strftime("%d/%m/%Y"),
+                                valor=val_abat,
+                                forma=forma_abat,
+                                obs=obs_abat
+                            )
+                            st.success(f"✅ Abatimento de {fmt_br(val_abat)} registrado para {forn_abat.get('nome')}!")
+                            st.rerun()
 
     st.markdown("---")
-    st.markdown("### 📋 Lista de Fornecedores Cadastrados e Contas")
+    st.markdown("### 📊 Painel de Saldo Devedor & Contas de Fornecedores")
 
     if not fornecedores_cadastrados:
-        st.info("Nenhum fornecedor cadastrado até o momento. Utilize o formulário acima para adicionar.")
+        st.info("Nenhum fornecedor cadastrado até o momento.")
     else:
-        # Calcular quanto foi contratado/gasto com base nos eventos e histórico de pagamentos
         dados_forn_tabela = []
         for forn in fornecedores_cadastrados:
+            f_id = forn.get("id")
             nome_f = forn.get("nome", "")
             
-            # Varre os eventos para somar custos associados a este fornecedor pelo nome na descrição ou histórico
+            # Soma contratada dos eventos
             total_contratado_f = 0.0
-            total_pago_f = 0.0
-            
             for ev in faturamentos:
-                # Procura nos fornecedores externos
                 for fx in ev.get("Fornecedores Externos", []):
                     if nome_f.lower() in str(fx.get("Descrição", "")).lower():
                         total_contratado_f += safe_float(fx.get("Valor", 0))
-                # Procura no histórico de pagamentos gerais se o nome consta como favorecido
-                for hp in ev.get("Historico Pagamentos", []):
-                    if nome_f.lower() in str(hp.get("Favorecido", "")).lower():
-                        total_pago_f += safe_float(hp.get("Valor", 0))
 
-            falta_pagar_f = max(0.0, total_contratado_f - total_pago_f)
+            # Soma dos abatimentos diretos cadastrados
+            pagamentos_diretos = [p for p in pagamentos_fornecedores_lista if p.get("fornecedor_id") == f_id]
+            total_abatido_direto = sum(safe_float(p.get("valor", 0.0)) for p in pagamentos_diretos)
+
+            saldo_devedor = max(0.0, total_contratado_f - total_abatido_direto)
+            status_saldo = "🟢 Quitado" if saldo_devedor == 0 and total_contratado_f > 0 else ("🔴 Em Aberto" if saldo_devedor > 0 else "⚪ Sem Movimento")
 
             dados_forn_tabela.append({
-                "ID": forn.get("id"),
-                "Nome": nome_f,
+                "ID": f_id,
+                "Fornecedor": nome_f,
                 "Categoria": forn.get("categoria"),
                 "Telefone": forn.get("telefone"),
-                "Dados Bancários": forn.get("dados_bancarios"),
-                "Total Alocado/Contratado": fmt_br(total_contratado_f),
-                "Total Já Pago": fmt_br(total_pago_f),
-                "⚠️ Falta Pagar (Em Aberto)": fmt_br(falta_pagar_f)
+                "Total Contratado": fmt_br(total_contratado_f),
+                "Total Abatido/Pago": fmt_br(total_abatido_direto),
+                "⚠️ Saldo Devedor": fmt_br(saldo_devedor),
+                "Status": status_saldo,
+                "Dados Bancários": forn.get("dados_bancarios")
             })
 
         df_forn_view = pd.DataFrame(dados_forn_tabela)
         st.dataframe(df_forn_view, use_container_width=True)
 
-        st.markdown("### 🗑️ Gerir / Excluir Fornecedor")
+        # SEÇÃO DE VER HISTÓRICO DE ABATIMENTOS DE UM FORNECEDOR
+        st.markdown("---")
+        st.markdown("### 📜 Extrato Detalhado de Abatimentos por Fornecedor")
+        
+        forn_sel_extrato = st.selectbox(
+            "Selecione o Fornecedor para ver o extrato de pagamentos:",
+            options=fornecedores_cadastrados,
+            format_func=lambda x: f"{x.get('nome')} ({x.get('categoria')})"
+        )
+
+        if forn_sel_extrato:
+            pags_f = [p for p in pagamentos_fornecedores_lista if p.get("fornecedor_id") == forn_sel_extrato.get("id")]
+            if not pags_f:
+                st.info(f"Nenhum abatimento registrado ainda para **{forn_sel_extrato.get('nome')}**.")
+            else:
+                df_pags_f = pd.DataFrame(pags_f)
+                df_pags_f["Valor Formatado"] = df_pags_f["valor"].apply(fmt_br)
+                
+                st.dataframe(
+                    df_pags_f[["id", "data_pagamento", "Valor Formatado", "forma_pagamento", "observacao"]].rename(columns={
+                        "id": "ID",
+                        "data_pagamento": "Data",
+                        "Valor Formatado": "Valor Abatido",
+                        "forma_pagamento": "Forma",
+                        "observacao": "Observação"
+                    }),
+                    use_container_width=True
+                )
+                
+                # Opção para excluir lançamento incorreto
+                with st.expander("🗑️ Cancelar / Excluir um Lançamento de Abatimento"):
+                    id_pag_excluir = st.number_input("Digite o ID do lançamento a excluir:", min_value=1, step=1)
+                    if st.button("Remover Abatimento"):
+                        deletar_pagamento_fornecedor_db(id_pag_excluir)
+                        st.warning("🗑️ Lançamento de abatimento removido!")
+                        st.rerun()
+
+        st.markdown("---")
+        st.markdown("### 🗑️ Gerir / Excluir Cadastro de Fornecedor")
         forn_para_excluir = st.selectbox(
             "Selecione o fornecedor para remover:",
             options=fornecedores_cadastrados,
-            format_func=lambda x: f"ID #{x.get('id')} - {x.get('nome')} ({x.get('categoria')})"
+            format_func=lambda x: f"ID #{x.get('id')} - {x.get('nome')} ({x.get('categoria')})",
+            key="sel_excluir_forn"
         )
-        if st.button("❌ Excluir Fornecedor Selecionado"):
+        if st.button("❌ Excluir Cadastro de Fornecedor"):
             if forn_para_excluir:
                 deletar_fornecedor_db(forn_para_excluir.get("id"))
                 st.warning(f"🗑️ Fornecedor {forn_para_excluir.get('nome')} removido com sucesso!")
