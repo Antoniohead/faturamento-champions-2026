@@ -177,6 +177,27 @@ def carregar_eventos():
     eventos.sort(key=extrair_data_obj, reverse=True)
     return eventos
 
+def carregar_fornecedores():
+    try:
+        response = supabase.table("fornecedores").select("*").execute()
+        return response.data or []
+    except Exception:
+        return []
+
+def salvar_fornecedor_db(reg):
+    payload = {
+        "nome": str(reg.get("nome") or ""),
+        "categoria": str(reg.get("categoria") or ""),
+        "telefone": str(reg.get("telefone") or ""),
+        "email": str(reg.get("email") or ""),
+        "dados_bancarios": str(reg.get("dados_bancarios") or ""),
+        "observacoes": str(reg.get("observacoes") or "")
+    }
+    supabase.table("fornecedores").insert(payload).execute()
+
+def deletar_fornecedor_db(id_forn):
+    supabase.table("fornecedores").delete().eq("id", id_forn).execute()
+
 def salvar_evento_db(reg):
     payload = {
         "cliente": str(reg.get("Cliente") or "Não informado"),
@@ -587,6 +608,7 @@ with col_tit:
 st.markdown("---")
 
 faturamentos = carregar_eventos()
+fornecedores_cadastrados = carregar_fornecedores()
 
 # --- PAINEL GERAL DE INDICADORES (COM SEPARAÇÃO PENDENTE X APROVADO) ---
 if faturamentos:
@@ -646,14 +668,15 @@ if faturamentos:
 
     st.markdown("---")
 
-aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
+aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8 = st.tabs([
     "➕ Novo Evento",
     "✏️ Baixas & Edição",
     "🗓️ Calendário",
     "🧾 Recibos & Comprovantes",
     "📊 Dashboards & Margens",
     "📲 WhatsApp Rápido",
-    "📄 Relatórios & PDFs"
+    "📄 Relatórios & PDFs",
+    "🌐 Fornecedores & Contas"
 ])
 
 # ABA 1: NOVO EVENTO
@@ -1238,3 +1261,85 @@ with aba7:
             ]],
             use_container_width=True
         )
+
+# ABA 8: FORNECEDORES & CONTAS A PAGAR
+with aba8:
+    st.subheader("🌐 Gestão de Fornecedores e Contas a Pagar")
+    
+    with st.expander("➕ Cadastrar Novo Fornecedor ou Prestador de Serviço", expanded=False):
+        with st.form("form_novo_fornecedor"):
+            f_nome = st.text_input("Nome do Fornecedor / Empresa", placeholder="Ex: Locadora de Equipamentos X, Técnico Y")
+            f_cat = st.selectbox("Categoria", ["Equipamentos / LED", "Serviço Técnico / Cachê", "Logística / Frete", "Outros"])
+            f_tel = st.text_input("Telefone / Contato", placeholder="Ex: (11) 99999-9999")
+            f_email = st.text_input("E-mail", placeholder="contato@fornecedor.com")
+            f_banco = st.text_area("Dados Bancários / Chave Pix", placeholder="Banco, Agência, Conta, Pix...")
+            f_obs = st.text_area("Observações sobre o Fornecedor")
+            
+            btn_salvar_forn = st.form_submit_button("💾 Salvar Fornecedor", use_container_width=True)
+            if btn_salvar_forn:
+                if not f_nome:
+                    st.error("O nome do fornecedor é obrigatório.")
+                else:
+                    salvar_fornecedor_db({
+                        "nome": f_nome,
+                        "categoria": f_cat,
+                        "telefone": f_tel,
+                        "email": f_email,
+                        "dados_bancarios": f_banco,
+                        "observacoes": f_obs
+                    })
+                    st.success("✅ Fornecedor cadastrado com sucesso!")
+                    st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 📋 Lista de Fornecedores Cadastrados e Contas")
+
+    if not fornecedores_cadastrados:
+        st.info("Nenhum fornecedor cadastrado até o momento. Utilize o formulário acima para adicionar.")
+    else:
+        # Calcular quanto foi contratado/gasto com base nos eventos e histórico de pagamentos
+        dados_forn_tabela = []
+        for forn in fornecedores_cadastrados:
+            nome_f = forn.get("nome", "")
+            
+            # Varre os eventos para somar custos associados a este fornecedor pelo nome na descrição ou histórico
+            total_contratado_f = 0.0
+            total_pago_f = 0.0
+            
+            for ev in faturamentos:
+                # Procura nos fornecedores externos
+                for fx in ev.get("Fornecedores Externos", []):
+                    if nome_f.lower() in str(fx.get("Descrição", "")).lower():
+                        total_contratado_f += safe_float(fx.get("Valor", 0))
+                # Procura no histórico de pagamentos gerais se o nome consta como favorecido
+                for hp in ev.get("Historico Pagamentos", []):
+                    if nome_f.lower() in str(hp.get("Favorecido", "")).lower():
+                        total_pago_f += safe_float(hp.get("Valor", 0))
+
+            falta_pagar_f = max(0.0, total_contratado_f - total_pago_f)
+
+            dados_forn_tabela.append({
+                "ID": forn.get("id"),
+                "Nome": nome_f,
+                "Categoria": forn.get("categoria"),
+                "Telefone": forn.get("telefone"),
+                "Dados Bancários": forn.get("dados_bancarios"),
+                "Total Alocado/Contratado": fmt_br(total_contratado_f),
+                "Total Já Pago": fmt_br(total_pago_f),
+                "⚠️ Falta Pagar (Em Aberto)": fmt_br(falta_pagar_f)
+            })
+
+        df_forn_view = pd.DataFrame(dados_forn_tabela)
+        st.dataframe(df_forn_view, use_container_width=True)
+
+        st.markdown("### 🗑️ Gerir / Excluir Fornecedor")
+        forn_para_excluir = st.selectbox(
+            "Selecione o fornecedor para remover:",
+            options=fornecedores_cadastrados,
+            format_func=lambda x: f"ID #{x.get('id')} - {x.get('nome')} ({x.get('categoria')})"
+        )
+        if st.button("❌ Excluir Fornecedor Selecionado"):
+            if forn_para_excluir:
+                deletar_fornecedor_db(forn_para_excluir.get("id"))
+                st.warning(f"🗑️ Fornecedor {forn_para_excluir.get('nome')} removido com sucesso!")
+                st.rerun()
