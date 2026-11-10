@@ -671,10 +671,11 @@ if faturamentos:
     total_recebido = safe_float(df_kpi["Valor Recebido Cliente"].sum())
     total_falta_receber = total_faturado_geral - total_recebido
     
-    total_pago_equipe = safe_float(df_kpi["Valor Pago Equipe"].sum())
+    # Total já pago consolidando os abatimentos diretos da tabela pagamentos_fornecedores
+    total_abatimentos_geral = sum(safe_float(p.get("valor", 0.0)) for p in pagamentos_fornecedores_lista)
+    total_pago_equipe = safe_float(df_kpi["Valor Pago Equipe"].sum()) + total_abatimentos_geral
     total_falta_pagar_equipe = total_custos_equipe - total_pago_equipe
     
-    # Cálculo corrigido: Lucro Real apenas dos Aprovados vs Total Geral
     lucro_liquido_aprovado = safe_float(df_aprovados["Lucro Real"].sum())
     lucro_liquido_total = safe_float(df_kpi["Lucro Real"].sum())
 
@@ -817,7 +818,6 @@ with aba1:
         reembolsos_novo = df_reemb_edit.to_dict('records') if not df_reemb_edit.empty else []
         total_custos_op = custo_resolume + custo_iluminacao + custo_sonorizacao + custo_diretor + custo_logistica + custo_externo_total + val_reembolso_total
         
-        # Cálculo correto do lucro real sem dupla subtração
         lucro_real = faturamento_bruto_calc - imposto_nf_calc - total_custos_op
 
         st_rec = "Pago Total" if val_recebido_init >= faturamento_bruto_calc and faturamento_bruto_calc > 0 else ("Parcial" if val_recebido_init > 0 else "Pendente")
@@ -1061,7 +1061,6 @@ with aba2:
                 hist_rec_updated_list = df_hist_rec_updated.to_dict('records') if not df_hist_rec_updated.empty else []
                 hist_pag_updated_list = df_hist_pag_updated.to_dict('records') if not df_hist_pag_updated.empty else []
 
-                # Cálculo correto do lucro real sem dupla subtração
                 novo_lucro = e_fat_bruto_calc - e_imposto_nf_calc - novos_custos_totais
 
                 if total_rec_calculado >= e_fat_bruto_calc and e_fat_bruto_calc > 0:
@@ -1284,7 +1283,7 @@ with aba7:
             use_container_width=True
         )
 
-# ABA 8: FORNECEDORES & CONTAS A PAGAR (COM ABATIMENTOS E SALDO DEVEDOR)
+# ABA 8: FORNECEDORES & CONTAS A PAGAR (COM ABATIMENTOS E SALDO DEVEDOR / CRÉDITO)
 with aba8:
     st.subheader("🌐 Gestão de Fornecedores & Lançamento de Abatimentos")
     
@@ -1371,8 +1370,22 @@ with aba8:
             pagamentos_diretos = [p for p in pagamentos_fornecedores_lista if p.get("fornecedor_id") == f_id]
             total_abatido_direto = sum(safe_float(p.get("valor", 0.0)) for p in pagamentos_diretos)
 
-            saldo_devedor = max(0.0, total_contratado_f - total_abatido_direto)
-            status_saldo = "🟢 Quitado" if saldo_devedor == 0 and total_contratado_f > 0 else ("🔴 Em Aberto" if saldo_devedor > 0 else "⚪ Sem Movimento")
+            # Cálculo do Saldo Devedor ou Crédito (Saldo a Favor)
+            diferenca = total_contratado_f - total_abatido_direto
+            
+            if diferenca > 0:
+                saldo_devedor_str = fmt_br(diferenca)
+                status_saldo = "🔴 Em Aberto"
+            elif diferenca < 0:
+                # Pagou a mais! Exibe como Crédito / Saldo a Favor
+                saldo_devedor_str = f"Crédito: {fmt_br(abs(diferenca))}"
+                status_saldo = "🔵 Crédito a Favor"
+            else:
+                saldo_devedor_str = fmt_br(0.0)
+                status_saldo = "🟢 Quitado"
+
+            if total_contratado_f == 0 and total_abatido_direto == 0:
+                status_saldo = "⚪ Sem Movimento"
 
             dados_forn_tabela.append({
                 "ID": f_id,
@@ -1381,7 +1394,7 @@ with aba8:
                 "Telefone": forn.get("telefone"),
                 "Total Contratado": fmt_br(total_contratado_f),
                 "Total Abatido/Pago": fmt_br(total_abatido_direto),
-                "⚠️ Saldo Devedor": fmt_br(saldo_devedor),
+                "⚠️ Saldo / Crédito": saldo_devedor_str,
                 "Status": status_saldo,
                 "Dados Bancários": forn.get("dados_bancarios")
             })
