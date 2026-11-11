@@ -132,7 +132,6 @@ def carregar_eventos():
             st_pag = "Pendente"
 
         dt_ev_str = d.get("data_evento") or ""
-        # Número da OS automático baseado na data do evento
         num_os_auto = gerar_numero_os(dt_ev_str) if not d.get("numero_nf") else d.get("numero_nf")
 
         eventos.append({
@@ -247,7 +246,11 @@ def registrar_pagamento_socio_db(socio_nome, data_pag, valor, forma, evento_id, 
         "evento_ref_id": int(evento_id) if evento_id else None,
         "observacao": str(obs)
     }
-    supabase.table("pagamentos_socios").insert(payload).execute()
+    try:
+        supabase.table("pagamentos_socios").insert(payload).execute()
+    except Exception as e:
+        st.error(f"Erro detalhado no Supabase ao registrar repasse: {e}")
+        raise e
 
 def deletar_pagamento_socio_db(id_pag):
     supabase.table("pagamentos_socios").delete().eq("id", id_pag).execute()
@@ -1393,7 +1396,7 @@ with aba7:
         
         wsp_num = st.text_input("Número do WhatsApp (com DDD)", placeholder="Ex: 11999998888")
         
-        # Mensagem limpa sem os valores detalhados conforme solicitado
+        # Mensagem limpa sem valores detalhados conforme solicitado
         msg_padrao = f"""Olá, tudo bem? Segue o resumo do evento para *{evt_wsp['Cliente']}*:
 
 📋 *O.S.:* {evt_wsp.get('Numero NF', '')}
@@ -1523,7 +1526,7 @@ with aba9:
                     btn_lancar_abat = st.form_submit_button("🟢 Abater do Saldo Devedor", use_container_width=True)
                     if btn_lancar_abat:
                         if val_abat <= 0:
-                            st.error("Por favor, por favor digite um valor válido maior que zero.")
+                            st.error("Por favor, digite um valor válido maior que zero.")
                         else:
                             registrar_abatimento_fornecedor_db(
                                 fornecedor_id=forn_abat.get("id"),
