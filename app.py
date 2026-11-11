@@ -218,6 +218,28 @@ def registrar_abatimento_fornecedor_db(fornecedor_id, data_pag, valor, forma, ob
 def deletar_pagamento_fornecedor_db(id_pag):
     supabase.table("pagamentos_fornecedores").delete().eq("id", id_pag).execute()
 
+# --- BD SÓCIOS ---
+def carregar_pagamentos_socios():
+    try:
+        response = supabase.table("pagamentos_socios").select("*").execute()
+        return response.data or []
+    except Exception:
+        return []
+
+def registrar_pagamento_socio_db(socio_nome, data_pag, valor, forma, evento_id, obs):
+    payload = {
+        "socio_nome": str(socio_nome),
+        "data_pagamento": str(data_pag),
+        "valor": safe_float(valor),
+        "forma_pagamento": str(forma),
+        "evento_ref_id": int(evento_id) if evento_id else None,
+        "observacao": str(obs)
+    }
+    supabase.table("pagamentos_socios").insert(payload).execute()
+
+def deletar_pagamento_socio_db(id_pag):
+    supabase.table("pagamentos_socios").delete().eq("id", id_pag).execute()
+
 def salvar_evento_db(reg):
     payload = {
         "cliente": str(reg.get("Cliente") or "Não informado"),
@@ -606,15 +628,33 @@ st.set_page_config(
     layout="wide"
 )
 
+# AJUSTE DE CSS: GARANTIR CONTRASTE EM TODOS OS CAMPOS E TABELAS
 st.markdown("""
     <style>
     .stApp { background-color: #1A1412; color: #FAF6EE; }
     .stExpander { background-color: #2A201C !important; border: 1px solid #C5A059 !important; border-radius: 8px; }
-    input, textarea, select, div[role="combobox"] { color: #FAF6EE !important; background-color: #2A201C !important; -webkit-text-fill-color: #FAF6EE !important; }
-    div[data-baseweb="input"], div[data-baseweb="textarea"], div[data-baseweb="select"] { background-color: #2A201C !important; border: 1px solid #C5A059 !important; border-radius: 6px !important; }
+    
+    /* Forçar fundo escuro e texto claro em todos os campos editáveis */
+    input, textarea, select, div[role="combobox"], div[data-baseweb="select"] { 
+        color: #FAF6EE !important; 
+        background-color: #2A201C !important; 
+        -webkit-text-fill-color: #FAF6EE !important; 
+    }
+    div[data-baseweb="input"], div[data-baseweb="textarea"], div[data-baseweb="select"] > div { 
+        background-color: #2A201C !important; 
+        border: 1px solid #C5A059 !important; 
+        border-radius: 6px !important; 
+        color: #FAF6EE !important;
+    }
     ::placeholder { color: #A09080 !important; opacity: 0.8 !important; }
     
-    /* Correção de alta visibilidade e contraste para botões normais e de download */
+    /* Tabelas e editores de dados */
+    div[data-testid="stDataEditor"], div[data-testid="stTable"], .stDataFrame { 
+        background-color: #2A201C !important; 
+        color: #FAF6EE !important; 
+    }
+    
+    /* Estilo dos Botões */
     .stButton>button, div.stDownloadButton>button { 
         background: linear-gradient(135deg, #C5A059 0%, #9A7B3E 100%) !important; 
         color: #1A1412 !important; 
@@ -657,8 +697,9 @@ st.markdown("---")
 faturamentos = carregar_eventos()
 fornecedores_cadastrados = carregar_fornecedores()
 pagamentos_fornecedores_lista = carregar_pagamentos_fornecedores()
+pagamentos_socios_lista = carregar_pagamentos_socios()
 
-# --- PAINEL GERAL DE INDICADORES (COM TRATAMENTO DE CRÉDITO) ---
+# --- PAINEL GERAL DE INDICADORES (COM CARD DE FALTA RECEBER) ---
 if faturamentos:
     df_kpi_raw = pd.DataFrame(faturamentos)
     clientes_unicos = sorted(list(set(df_kpi_raw["Cliente"].dropna().tolist())))
@@ -687,12 +728,12 @@ if faturamentos:
 
     total_faturado_aprovado = safe_float(df_aprovados["Faturamento Bruto"].sum())
     total_faturado_pendente = safe_float(df_pendentes["Faturamento Bruto"].sum())
-    total_faturado_geral = safe_float(df_kpi["Faturamento Bruto"].sum())
 
     total_custos_equipe = safe_float(df_kpi["Custos Operacionais + Logística"].sum())
     total_impostos = safe_float(df_kpi["10% NF"].sum())
     
     total_recebido = safe_float(df_kpi["Valor Recebido Cliente"].sum())
+    falta_receber_total = safe_float(df_kpi["Faturamento Bruto"].sum()) - total_recebido
     
     total_abatimentos_geral = sum(safe_float(p.get("valor", 0.0)) for p in pagamentos_fornecedores_lista)
     total_pago_equipe = safe_float(df_kpi["Valor Pago Equipe"].sum()) + total_abatimentos_geral
@@ -705,26 +746,26 @@ if faturamentos:
 
     st.caption(f"Exibindo dados de: **{lbl_contexto}** ({len(df_kpi)} evento(s) encontrado(s))")
 
+    # PRIMEIRA LINHA DE CARDS
     kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
     kpi_col1.metric("🟢 Faturado (Aprovado)", fmt_br(total_faturado_aprovado))
     kpi_col2.metric("🟡 Em Negociação (Pendente)", fmt_br(total_faturado_pendente))
     kpi_col3.metric("✅ Total Recebido (Cliente)", fmt_br(total_recebido))
-    kpi_col4.metric("📈 Lucro Líquido (Aprovados)", fmt_br(lucro_liquido_aprovado), delta=f"Total c/ Pendentes: {fmt_br(lucro_liquido_total)}")
+    kpi_col4.metric("⏳ Falta Receber (Clientes)", fmt_br(max(0.0, falta_receber_total)), delta_color="inverse")
 
+    # SEGUNDA LINHA DE CARDS
     kpi_col5, kpi_col6, kpi_col7, kpi_col8 = st.columns(4)
-    kpi_col5.metric("👥 Custo Total Operacional", fmt_br(total_custos_equipe))
-    kpi_col6.metric("💸 Total Já Pago (Equipe/Ext)", fmt_br(total_pago_equipe))
-    
-    delta_pagamento = f"Crédito Pago a Maior: {fmt_br(abs(falta_pagar_bruta))}" if falta_pagar_bruta < 0 else None
-    kpi_col7.metric("⚠️ A Pagar Pessoas/Serviços", fmt_br(total_falta_pagar_equipe), delta=delta_pagamento, delta_color="inverse")
-    
-    kpi_col8.metric("🧾 Impostos Reservados (10% NF)", fmt_br(total_impostos))
+    kpi_col5.metric("📈 Lucro Líquido (Aprovados)", fmt_br(lucro_liquido_aprovado), delta=f"Total c/ Pendentes: {fmt_br(lucro_liquido_total)}")
+    kpi_col6.metric("👥 Custo Total Operacional", fmt_br(total_custos_equipe))
+    kpi_col7.metric("💸 Total Já Pago (Equipe/Ext)", fmt_br(total_pago_equipe))
+    kpi_col8.metric("⚠️ A Pagar Pessoas/Serviços", fmt_br(total_falta_pagar_equipe), delta_color="inverse")
 
     st.markdown("---")
 
-aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8 = st.tabs([
+aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8, aba9 = st.tabs([
     "➕ Novo Evento",
     "✏️ Baixas & Edição",
+    "🤝 Sócios & Lucros",
     "🗓️ Calendário",
     "🧾 Recibos & Comprovantes",
     "📊 Dashboards & Margens",
@@ -1155,8 +1196,96 @@ with aba2:
                 st.warning("🗑️ Evento excluído do Supabase!")
                 st.rerun()
 
-# ABA 3: CALENDÁRIO OPERACIONAL & CRONOGRAMA
+# ABA 3: SÓCIOS & DIVISÃO DE LUCROS
 with aba3:
+    st.subheader("🤝 Gestão de Retiradas e Divisão de Lucros dos Sócios")
+    st.markdown("Acompanhe o lucro real acumulado nos eventos aprovados e registre as transferências efetuadas para os sócios.")
+
+    if not faturamentos:
+        st.info("Nenhum evento registrado para cálculo de lucros.")
+    else:
+        df_soc = pd.DataFrame(faturamentos)
+        df_soc_aprov = df_soc[df_soc["Status"] == "Aprovado"]
+        
+        lucro_miguel_direito = safe_float(df_soc_aprov["Lucro Miguel Araújo"].sum())
+        lucro_antonio_direito = safe_float(df_soc_aprov["Lucro Antonio Carlos"].sum())
+        lucro_total_direito = safe_float(df_soc_aprov["Lucro Real"].sum())
+
+        pags_miguel = [p for p in pagamentos_socios_lista if p.get("socio_nome") == "Miguel Araújo"]
+        pags_antonio = [p for p in pagamentos_socios_lista if p.get("socio_nome") == "Antonio Carlos"]
+
+        total_pago_miguel = sum(safe_float(p.get("valor", 0.0)) for p in pags_miguel)
+        total_pago_antonio = sum(safe_float(p.get("valor", 0.0)) for p in pags_antonio)
+
+        saldo_miguel = lucro_miguel_direito - total_pago_miguel
+        saldo_antonio = lucro_antonio_direito - total_pago_antonio
+
+        col_s1, col_s2, col_s3 = st.columns(3)
+        col_s1.metric("💰 Lucro Real Total (Aprovados)", fmt_br(lucro_total_direito))
+        col_s2.metric("👤 Parte Miguel Araújo (50%)", fmt_br(lucro_miguel_direito), delta=f"Pago: {fmt_br(total_pago_miguel)} | Resta: {fmt_br(saldo_miguel)}")
+        col_s3.metric("👤 Parte Antonio Carlos (50%)", fmt_br(lucro_antonio_direito), delta=f"Pago: {fmt_br(total_pago_antonio)} | Resta: {fmt_br(saldo_antonio)}")
+
+        st.markdown("---")
+        with st.expander("💸 Lançar Transferência / Repasse de Lucro a Sócio", expanded=True):
+            with st.form("form_novo_pagamento_socio"):
+                col_ps1, col_ps2, col_ps3 = st.columns(3)
+                with col_ps1:
+                    socio_dest = st.selectbox("Sócio Beneficiário", ["Antonio Carlos", "Miguel Araújo"])
+                    data_ps = st.date_input("Data do Pagamento", datetime.now())
+                with col_ps2:
+                    valor_ps = st.number_input("Valor Transferido (R$)", min_value=0.0, step=100.0)
+                    forma_ps = st.selectbox("Forma de Pagamento", ["Pix", "Transferência / TED", "Dinheiro", "Outro"])
+                with col_ps3:
+                    opcoes_evt = [("Sem Vínculo (Geral)", None)] + [(f"ID #{e['id']} - {e['Cliente']}", e['id']) for e in faturamentos]
+                    evt_ref_sel = st.selectbox("Evento Referência (Opcional)", options=opcoes_evt, format_func=lambda x: x[0])
+                    obs_ps = st.text_input("Observação", placeholder="Ex: Repasse parcial lucro evento X")
+
+                btn_lancar_ps = st.form_submit_button("🟢 Registrar Transferência ao Sócio", use_container_width=True)
+                if btn_lancar_ps:
+                    if valor_ps <= 0:
+                        st.error("Digite um valor maior que zero.")
+                    else:
+                        registrar_pagamento_socio_db(
+                            socio_nome=socio_dest,
+                            data_pag=data_ps.strftime("%d/%m/%Y"),
+                            valor=valor_ps,
+                            forma=forma_ps,
+                            evento_id=evt_ref_sel[1],
+                            obs=obs_ps
+                        )
+                        st.success(f"✅ Transferência de {fmt_br(valor_ps)} registrada para {socio_dest}!")
+                        st.rerun()
+
+        st.markdown("---")
+        st.markdown("### 📜 Extrato de Pagamentos Efetuados aos Sócios")
+        if not pagamentos_socios_lista:
+            st.info("Nenhuma transferência registrada para sócios até o momento.")
+        else:
+            df_ps_view = pd.DataFrame(pagamentos_socios_lista)
+            df_ps_view["Valor Formatado"] = df_ps_view["valor"].apply(fmt_br)
+            
+            st.dataframe(
+                df_ps_view[["id", "socio_nome", "data_pagamento", "Valor Formatado", "forma_pagamento", "evento_ref_id", "observacao"]].rename(columns={
+                    "id": "ID",
+                    "socio_nome": "Sócio",
+                    "data_pagamento": "Data",
+                    "Valor Formatado": "Valor Pago",
+                    "forma_pagamento": "Forma",
+                    "evento_ref_id": "ID Evento Ref.",
+                    "observacao": "Observação"
+                }),
+                use_container_width=True
+            )
+
+            with st.expander("🗑️ Excluir um Lançamento de Repasse"):
+                id_ps_del = st.number_input("Digite o ID da transferência a excluir:", min_value=1, step=1, key="del_ps_inp")
+                if st.button("Remover Transferência", key="btn_del_ps"):
+                    deletar_pagamento_socio_db(id_ps_del)
+                    st.warning("🗑️ Lançamento de transferência removido!")
+                    st.rerun()
+
+# ABA 4: CALENDÁRIO OPERACIONAL & CRONOGRAMA
+with aba4:
     st.subheader("🗓️ Calendário Operacional & Cronograma de Produção")
     if not faturamentos:
         st.info("Nenhum evento registrado no banco de dados.")
@@ -1167,8 +1296,8 @@ with aba3:
         df_cal_display = df_cal[["Data Montagem", "Horário Montagem", "Data Evento", "Horário", "Cliente", "Complexo / Local", "Status", "Equipe Técnica"]].copy()
         st.dataframe(df_cal_display, use_container_width=True)
 
-# ABA 4: GERADOR DE RECIBOS DE CACHÊ / REEMBOLSO
-with aba4:
+# ABA 5: GERADOR DE RECIBOS DE CACHÊ / REEMBOLSO
+with aba5:
     st.subheader("🧾 Gerador Automático de Recibos de Cachê e Reembolsos")
     if not faturamentos:
         st.info("Nenhum evento cadastrado para emissão de recibos.")
@@ -1201,8 +1330,8 @@ with aba4:
                     use_container_width=True
                 )
 
-# ABA 5: DASHBOARD DE MARGENS E DESEMPENHO POR CLIENTE
-with aba5:
+# ABA 6: DASHBOARD DE MARGENS E DESEMPENHO POR CLIENTE
+with aba6:
     st.subheader("📊 Dashboards de Lucratividade e Margens por Cliente")
     if not faturamentos:
         st.info("Nenhum dado financeiro registrado para gráficos.")
@@ -1216,8 +1345,8 @@ with aba5:
         df_pie = df_dash.groupby("Cliente")["Faturamento Bruto"].sum()
         st.dataframe(df_pie)
 
-# ABA 6: ATENDIMENTO / WHATSAPP RÁPIDO
-with aba6:
+# ABA 7: ATENDIMENTO / WHATSAPP RÁPIDO
+with aba7:
     st.subheader("📲 Atendimento & Envio Rápido via WhatsApp")
     if not faturamentos:
         st.info("Nenhum evento registrado para envio.")
@@ -1250,8 +1379,8 @@ Permanecemos à disposição!
             wsp_link = f"https://api.whatsapp.com/send?phone=55{num_clean}&text={msg_encoded}"
             st.markdown(f'<a href="{wsp_link}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366; color:white; font-weight:bold; padding:10px 20px; border:none; border-radius:8px; cursor:pointer; width:100%;">💬 Abrir no WhatsApp Web</button></a>', unsafe_allow_html=True)
 
-# ABA 7: TABELA DETALHADA, RELATÓRIOS E BACKUPS EXCEL
-with aba7:
+# ABA 8: TABELA DETALHADA, RELATÓRIOS E BACKUPS EXCEL
+with aba8:
     st.subheader("📄 Emissão de Documentos e PDFs de Orçamento")
     if faturamentos:
         col_sel, col_btn1, col_btn2 = st.columns([2, 1, 1])
@@ -1310,8 +1439,8 @@ with aba7:
             use_container_width=True
         )
 
-# ABA 8: FORNECEDORES & CONTAS A PAGAR (COM ABATIMENTOS, SALDO DEVEDOR / CRÉDITO E EXPORTAÇÃO EXCEL)
-with aba8:
+# ABA 9: FORNECEDORES & CONTAS A PAGAR
+with aba9:
     st.subheader("🌐 Gestão de Fornecedores & Lançamento de Abatimentos")
     
     col_cad1, col_cad2 = st.columns(2)
