@@ -628,7 +628,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# AJUSTE DE CSS: GARANTIR CONTRASTE EM TODOS OS CAMPOS E TABELAS
+# AJUSTE DE CSS: GARANTIR CONTRASTE EM DELTAS E ELEMENTOS CLAROS
 st.markdown("""
     <style>
     .stApp { background-color: #1A1412; color: #FAF6EE; }
@@ -647,6 +647,15 @@ st.markdown("""
         color: #FAF6EE !important;
     }
     ::placeholder { color: #A09080 !important; opacity: 0.8 !important; }
+    
+    /* Correção de contraste nos elementos de delta (fundo claro com texto escuro visível) */
+    div[data-testid="stMetricDelta"] > div {
+        color: #1A1412 !important;
+        background-color: #FAF6EE !important;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+    }
     
     /* Tabelas e editores de dados */
     div[data-testid="stDataEditor"], div[data-testid="stTable"], .stDataFrame { 
@@ -699,7 +708,7 @@ fornecedores_cadastrados = carregar_fornecedores()
 pagamentos_fornecedores_lista = carregar_pagamentos_fornecedores()
 pagamentos_socios_lista = carregar_pagamentos_socios()
 
-# --- PAINEL GERAL DE INDICADORES (COM CARD DE FALTA RECEBER) ---
+# --- PAINEL GERAL DE INDICADORES (COM CÁLCULO DE FALTA RECEBER CORRIGIDO PARA APROVADOS) ---
 if faturamentos:
     df_kpi_raw = pd.DataFrame(faturamentos)
     clientes_unicos = sorted(list(set(df_kpi_raw["Cliente"].dropna().tolist())))
@@ -733,7 +742,10 @@ if faturamentos:
     total_impostos = safe_float(df_kpi["10% NF"].sum())
     
     total_recebido = safe_float(df_kpi["Valor Recebido Cliente"].sum())
-    falta_receber_total = safe_float(df_kpi["Faturamento Bruto"].sum()) - total_recebido
+    
+    # CORREÇÃO: Falta Receber baseado estritamente nos aprovados (ou filtrados) menos o que já entrou
+    total_recebido_aprovados = safe_float(df_aprovados["Valor Recebido Cliente"].sum())
+    falta_receber_total = total_faturado_aprovado - total_recebido_aprovados
     
     total_abatimentos_geral = sum(safe_float(p.get("valor", 0.0)) for p in pagamentos_fornecedores_lista)
     total_pago_equipe = safe_float(df_kpi["Valor Pago Equipe"].sum()) + total_abatimentos_geral
@@ -751,7 +763,7 @@ if faturamentos:
     kpi_col1.metric("🟢 Faturado (Aprovado)", fmt_br(total_faturado_aprovado))
     kpi_col2.metric("🟡 Em Negociação (Pendente)", fmt_br(total_faturado_pendente))
     kpi_col3.metric("✅ Total Recebido (Cliente)", fmt_br(total_recebido))
-    kpi_col4.metric("⏳ Falta Receber (Clientes)", fmt_br(max(0.0, falta_receber_total)), delta_color="inverse")
+    kpi_col4.metric("⏳ Falta Receber (Aprovados)", fmt_br(max(0.0, falta_receber_total)), delta_color="inverse")
 
     # SEGUNDA LINHA DE CARDS
     kpi_col5, kpi_col6, kpi_col7, kpi_col8 = st.columns(4)
@@ -1590,7 +1602,7 @@ with aba9:
                 )
                 
                 with st.expander("🗑️ Cancelar / Excluir um Lançamento de Abatimento"):
-                    id_pag_excluir = st.number_input("Digite o ID do lançamento a excluir:", min_value=1, step=1, key="del_pag_inp")
+                    id_pag_excluir = st.number_input("Digite o ID da lançamento a excluir:", min_value=1, step=1, key="del_pag_inp")
                     if st.button("Remover Abatimento", key="btn_del_pag"):
                         deletar_pagamento_fornecedor_db(id_pag_excluir)
                         st.warning("🗑️ Lançamento de abatimento removido!")
