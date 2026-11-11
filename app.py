@@ -254,7 +254,8 @@ def registrar_pagamento_socio_db(socio_nome, data_pag, valor, forma, evento_id, 
     try:
         supabase.table("pagamentos_socios").insert(payload).execute()
     except Exception as e:
-        st.error(f"Erro detalhado no Supabase ao registrar repasse: {e}")
+        # Exibe o erro real retornado pelo Supabase na tela para sabermos a causa exata
+        st.error(f"DETALHE DO ERRO SUPABASE: {str(e)}")
         raise e
 
 def deletar_pagamento_socio_db(id_pag):
@@ -1401,7 +1402,7 @@ with aba7:
         
         wsp_num = st.text_input("Número do WhatsApp (com DDD)", placeholder="Ex: 11999998888")
         
-        msg_padrao = f"""Olá, tudo bem? Segue o resumo do evento para *{evt_wsp['Cliente']}*:
+        msg_padrao = f"""Olá, tudo bien? Segue o resumo do evento para *{evt_wsp['Cliente']}*:
 
 📋 *O.S.:* {evt_wsp.get('Numero NF', '')}
 📅 *Data do Evento:* {evt_wsp['Data Evento']} ({evt_wsp['Horário']})
