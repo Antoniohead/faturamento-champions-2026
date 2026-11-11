@@ -238,17 +238,19 @@ def carregar_pagamentos_socios():
         return []
 
 def registrar_pagamento_socio_db(socio_nome, data_pag, valor, forma, evento_id, obs):
-    # Tratamento seguro caso venha None ou vazio ("Sem Vínculo")
-    ev_id_tratado = int(evento_id) if evento_id else None
+    ev_id_tratado = int(evento_id) if evento_id and str(evento_id).strip() != "" else None
     
     payload = {
         "socio_nome": str(socio_nome),
         "data_pagamento": str(data_pag),
         "valor": safe_float(valor),
-        "forma_pagamento": str(forma),
-        "evento_ref_id": ev_id_tratado,
-        "observacao": str(obs)
+        "forma_pagamento": str(forma) if forma else "Pix",
+        "observacao": str(obs) if obs else ""
     }
+    
+    if ev_id_tratado is not None:
+        payload["evento_ref_id"] = ev_id_tratado
+
     try:
         supabase.table("pagamentos_socios").insert(payload).execute()
     except Exception as e:
