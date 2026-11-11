@@ -628,7 +628,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# AJUSTE DE CSS: GARANTIR CONTRASTE EM DELTAS E ELEMENTOS CLAROS
+# AJUSTE DE CSS: FORÇAR TEXTOS E DELTAS ESCUROS EM ELEMENTOS CLAROS OU REMOVER FUNDO BRANCO
 st.markdown("""
     <style>
     .stApp { background-color: #1A1412; color: #FAF6EE; }
@@ -648,13 +648,20 @@ st.markdown("""
     }
     ::placeholder { color: #A09080 !important; opacity: 0.8 !important; }
     
-    /* Correção de contraste nos elementos de delta (fundo claro com texto escuro visível) */
+    /* CORREÇÃO DEFINITIVA DOS DELTAS (Caixas brancas com texto invisível) */
+    div[data-testid="stMetricDelta"] {
+        background-color: #2A201C !important;
+        border: 1px solid #C5A059 !important;
+        border-radius: 6px !important;
+        padding: 4px 8px !important;
+    }
     div[data-testid="stMetricDelta"] > div {
-        color: #1A1412 !important;
-        background-color: #FAF6EE !important;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-weight: bold;
+        color: #FAF6EE !important;
+        background-color: transparent !important;
+        font-weight: bold !important;
+    }
+    div[data-testid="stMetricDelta"] svg {
+        fill: #00E676 !important;
     }
     
     /* Tabelas e editores de dados */
@@ -743,7 +750,6 @@ if faturamentos:
     
     total_recebido = safe_float(df_kpi["Valor Recebido Cliente"].sum())
     
-    # CORREÇÃO: Falta Receber baseado estritamente nos aprovados (ou filtrados) menos o que já entrou
     total_recebido_aprovados = safe_float(df_aprovados["Valor Recebido Cliente"].sum())
     falta_receber_total = total_faturado_aprovado - total_recebido_aprovados
     
@@ -1602,7 +1608,7 @@ with aba9:
                 )
                 
                 with st.expander("🗑️ Cancelar / Excluir um Lançamento de Abatimento"):
-                    id_pag_excluir = st.number_input("Digite o ID da lançamento a excluir:", min_value=1, step=1, key="del_pag_inp")
+                    id_pag_excluir = st.number_input("Digite o ID do lançamento a excluir:", min_value=1, step=1, key="del_pag_inp")
                     if st.button("Remover Abatimento", key="btn_del_pag"):
                         deletar_pagamento_fornecedor_db(id_pag_excluir)
                         st.warning("🗑️ Lançamento de abatimento removido!")
