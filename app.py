@@ -70,6 +70,14 @@ def fmt_br(val):
     s = f"{v:,.2f}"
     return f"R$ {s.replace(',', 'X').replace('.', ',').replace('X', '.')}"
 
+def gerar_numero_os(data_str):
+    """Gera o número da OS no formato DDMON/AA (ex: 27/11/2026 -> 2711/26)"""
+    try:
+        dt = datetime.strptime(data_str, "%d/%m/%Y")
+        return f"{dt.strftime('%d%m')}/{dt.strftime('%y')}"
+    except Exception:
+        return data_str
+
 def carregar_eventos():
     try:
         response = supabase.table("eventos").select("*").execute()
@@ -123,10 +131,14 @@ def carregar_eventos():
         else:
             st_pag = "Pendente"
 
+        dt_ev_str = d.get("data_evento") or ""
+        # Número da OS automático baseado na data do evento
+        num_os_auto = gerar_numero_os(dt_ev_str) if not d.get("numero_nf") else d.get("numero_nf")
+
         eventos.append({
             "id": d.get("id"),
             "Cliente": d.get("cliente") or "Não informado",
-            "Data Evento": d.get("data_evento") or "",
+            "Data Evento": dt_ev_str,
             "Horário": d.get("horario") or "",
             "Data Montagem": d.get("data_montagem") or "",
             "Horário Montagem": d.get("horario_montagem") or "",
@@ -155,7 +167,7 @@ def carregar_eventos():
             "Status Recebimento": st_rec,
             "Status Pagamento": st_pag,
             "Status": d.get("status") or "Pendente",
-            "Numero NF": d.get("numero_nf") or "",
+            "Numero NF": num_os_auto,
             "Valor NF": safe_float(d.get("valor_nf")),
             "Lucro Real": lucro,
             "Lucro Miguel Araújo": lucro * 0.50,
@@ -241,9 +253,12 @@ def deletar_pagamento_socio_db(id_pag):
     supabase.table("pagamentos_socios").delete().eq("id", id_pag).execute()
 
 def salvar_evento_db(reg):
+    dt_ev_val = str(reg.get("Data Evento") or "")
+    os_auto = gerar_numero_os(dt_ev_val)
+
     payload = {
         "cliente": str(reg.get("Cliente") or "Não informado"),
-        "data_evento": str(reg.get("Data Evento") or ""),
+        "data_evento": dt_ev_val,
         "horario": str(reg.get("Horário") or ""),
         "data_montagem": str(reg.get("Data Montagem") or ""),
         "horario_montagem": str(reg.get("Horário Montagem") or ""),
@@ -272,7 +287,7 @@ def salvar_evento_db(reg):
         "status_recebimento": str(reg.get("Status Recebimento") or "Pendente"),
         "status_pagamento": str(reg.get("Status Pagamento") or "Pendente"),
         "status": str(reg.get("Status") or "Pendente"),
-        "numero_nf": str(reg.get("Numero NF") or ""),
+        "numero_nf": os_auto,
         "valor_nf": safe_float(reg.get("Valor NF")),
         "lucro_real": safe_float(reg.get("Lucro Real")),
         "lucro_miguel": safe_float(reg.get("Lucro Miguel Araújo")),
@@ -430,7 +445,7 @@ def gerar_pdf_evento(registro, tipo_documento="ORCAMENTO"):
         story.append(RLImage("logo.png", width=560, height=130))
         story.append(Spacer(1, 10))
 
-    titulo_sec1 = "📌 ORÇAMENTO COMERCIAL E ESCOPO TÉCNICO" if tipo_documento == "ORCAMENTO" else "📌 RELATÓRIO DE CONTROLE FINANCEIRO INTERNO"
+    titulo_sec1 = f"📌 ORÇAMENTO COMERCIAL E ESCOPO TÉCNICO (OS: {registro.get('Numero NF', '')})" if tipo_documento == "ORCAMENTO" else f"📌 RELATÓRIO DE CONTROLE FINANCEIRO INTERNO (OS: {registro.get('Numero NF', '')})"
     sec1_hdr = Table([[Paragraph(titulo_sec1, sec_title_style)]], colWidths=[560])
     sec1_hdr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#2A201C")), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(sec1_hdr)
@@ -809,10 +824,11 @@ with aba1:
             equipe_tecnica = st.text_area("Descrição da Equipe Escalada (Uso Interno)", placeholder="Ex: 1 Tech Resolume, 1 Iluminação...")
             status_inicial = st.selectbox("📌 Status Inicial do Orçamento / O.S.:", ["Pendente", "Aprovado", "Rejeitado"])
 
-        st.markdown("### 📄 Faturamento & Nota Fiscal para o Cliente")
+        st.markdown("### 📄 Nota Fiscal / O.S. (Gerada automaticamente pela data)")
         nf_col1, nf_col2 = st.columns(2)
         with nf_col1:
-            numero_nf = st.text_input("Número da Nota Fiscal (NF) Emitida", placeholder="Ex: 000142")
+            os_sugerida = gerar_numero_os(data_evento.strftime("%d/%m/%Y"))
+            numero_nf = st.text_input("Número da O.S. (Automático)", value=os_sugerida)
         with nf_col2:
             valor_nf = st.number_input("Valor da NF Emitida (R$)", min_value=0.0, step=100.0)
 
@@ -965,13 +981,13 @@ with aba2:
     else:
         idx_edit = st.selectbox(
             "Selecione o Evento para Gestão Financeira:", range(len(faturamentos)),
-            format_func=lambda x: f"ID #{faturamentos[x]['id']} - [{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} ({faturamentos[x]['Data Evento']})"
+            format_func=lambda x: f"OS: {faturamentos[x].get('Numero NF', '')} - [{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} ({faturamentos[x]['Data Evento']})"
         )
         
         reg = faturamentos[idx_edit]
         
         with st.form(f"form_edicao_completa_{reg['id']}"):
-            st.markdown(f"### 📍 Gerenciando Evento ID #{reg['id']} - {reg['Cliente']}")
+            st.markdown(f"### 📍 Gerenciando Evento OS: {reg.get('Numero NF', '')} - {reg['Cliente']}")
             
             st.markdown("#### 📋 1. Identificação do Evento")
             ce_col1, ce_col2, ce_col3 = st.columns(3)
@@ -1001,10 +1017,10 @@ with aba2:
                 idx_st = opcoes_status.index(status_atual_reg) if status_atual_reg in opcoes_status else 0
                 e_status = st.selectbox("📌 Status do Orçamento / O.S.:", opcoes_status, index=idx_st)
 
-            st.markdown("#### 📄 Nota Fiscal Emitida para o Cliente")
+            st.markdown("#### 📄 Número da O.S. & Nota Fiscal")
             enf_col1, enf_col2 = st.columns(2)
             with enf_col1:
-                e_numero_nf = st.text_input("Número da Nota Fiscal", value=reg.get("Numero NF", ""))
+                e_numero_nf = st.text_input("Número da O.S.", value=reg.get("Numero NF", ""))
             with enf_col2:
                 e_valor_nf = st.number_input("Valor da Nota Fiscal (R$)", value=safe_float(reg.get("Valor NF", 0.0)), min_value=0.0, step=100.0)
 
@@ -1254,7 +1270,7 @@ with aba3:
                     valor_ps = st.number_input("Valor Transferido (R$)", min_value=0.0, step=100.0)
                     forma_ps = st.selectbox("Forma de Pagamento", ["Pix", "Transferência / TED", "Dinheiro", "Outro"])
                 with col_ps3:
-                    opcoes_evt = [("Sem Vínculo (Geral)", None)] + [(f"ID #{e['id']} - {e['Cliente']}", e['id']) for e in faturamentos]
+                    opcoes_evt = [("Sem Vínculo (Geral)", None)] + [(f"OS: {e['Numero NF']} - {e['Cliente']}", e['id']) for e in faturamentos]
                     evt_ref_sel = st.selectbox("Evento Referência (Opcional)", options=opcoes_evt, format_func=lambda x: x[0])
                     obs_ps = st.text_input("Observação", placeholder="Ex: Repasse parcial lucro evento X")
 
@@ -1311,8 +1327,8 @@ with aba4:
         df_cal = pd.DataFrame(faturamentos)
         st.markdown("### 📋 Cronograma de Montagens e Eventos")
         
-        df_cal_display = df_cal[["Data Montagem", "Horário Montagem", "Data Evento", "Horário", "Cliente", "Complexo / Local", "Status", "Equipe Técnica"]].copy()
-        st.dataframe(df_cal_display, use_container_width=True)
+        df_cal_display = df_cal[["Numero NF", "Data Montagem", "Horário Montagem", "Data Evento", "Horário", "Cliente", "Complexo / Local", "Status", "Equipe Técnica"]].copy()
+        st.dataframe(df_cal_display.rename(columns={"Numero NF": "OS"}), use_container_width=True)
 
 # ABA 5: GERADOR DE RECIBOS DE CACHÊ / REEMBOLSO
 with aba5:
@@ -1322,11 +1338,11 @@ with aba5:
     else:
         idx_rec_evt = st.selectbox(
             "Selecione o Evento referente ao Recibo:", range(len(faturamentos)),
-            format_func=lambda x: f"[{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
+            format_func=lambda x: f"OS: {faturamentos[x].get('Numero NF', '')} - [{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} ({faturamentos[x]['Data Evento']})"
         )
         evt_rec = faturamentos[idx_rec_evt]
         
-        st.markdown(f"#### Emissão para o Evento: **{evt_rec['Cliente']}** ({evt_rec['Data Evento']})")
+        st.markdown(f"#### Emissão para o Evento OS: {evt_rec.get('Numero NF', '')} - **{evt_rec['Cliente']}** ({evt_rec['Data Evento']})")
         
         rec_col1, rec_col2 = st.columns(2)
         with rec_col1:
@@ -1371,53 +1387,24 @@ with aba7:
     else:
         idx_wsp = st.selectbox(
             "Selecione o Evento para enviar o resumo ao cliente:", range(len(faturamentos)),
-            format_func=lambda x: f"[{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
+            format_func=lambda x: f"OS: {faturamentos[x].get('Numero NF', '')} - [{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
         )
         evt_wsp = faturamentos[idx_wsp]
         
         wsp_num = st.text_input("Número do WhatsApp (com DDD)", placeholder="Ex: 11999998888")
         
-        incluir_orcamento = st.checkbox("📄 Incluir orçamento detalhado (Base + Extras + Impostos) na mensagem", value=True)
-        
-        extras_texto = ""
-        itens_extras_wsp = evt_wsp.get("Itens Extras", [])
-        if incluir_orcamento and itens_extras_wsp:
-            extras_texto = "\n*➕ Adicionais / Extras:* \n" + "".join([f"• {item.get('Descrição')}: {fmt_br(safe_float(item.get('Valor')))}\n" for item in itens_extras_wsp])
+        # Mensagem limpa sem os valores detalhados conforme solicitado
+        msg_padrao = f"""Olá, tudo bem? Segue o resumo do evento para *{evt_wsp['Cliente']}*:
 
-        msg_padrao = f"""Olá, tudo bem? Segue o resumo comercial do evento para *{evt_wsp['Cliente']}*:
-
+📋 *O.S.:* {evt_wsp.get('Numero NF', '')}
 📅 *Data do Evento:* {evt_wsp['Data Evento']} ({evt_wsp['Horário']})
 📍 *Local:* {evt_wsp['Complexo / Local']}
 📌 *Status da O.S.:* {evt_wsp.get('Status', 'Pendente')}
-"""
-
-        if incluir_orcamento:
-            val_base_orc = safe_float(evt_wsp.get('Aprovado', 0))
-            val_extra_orc = safe_float(evt_wsp.get('Val. Extra', 0))
-            resp_imp_orc = evt_wsp.get('Responsável Imposto', 'Incluso no Valor')
-            val_imposto_orc = safe_float(evt_wsp.get('10% NF', 0))
-            
-            msg_padrao += f"""
-💵 *Composição do Orçamento:*
-• Valor Base: {fmt_br(val_base_orc)}"""
-            if val_extra_orc > 0:
-                msg_padrao += f"""
-• Adicionais/Extras: {fmt_br(val_extra_orc)}"""
-            if resp_imp_orc == "Por Conta do Cliente" and val_imposto_orc > 0:
-                msg_padrao += f"""
-• Impostos (10% NF): {fmt_br(val_imposto_orc)}"""
-            
-            msg_padrao += extras_texto
-
-        msg_padrao += f"""
-💰 *Valor Global Final:* {fmt_br(evt_wsp['Faturamento Bruto'])}
-📄 *NF Emitida:* {evt_wsp.get('Numero NF', 'Não emitida')} ({fmt_br(safe_float(evt_wsp.get('Valor NF', 0)))})
-⏳ *Saldo Pendente:* {fmt_br(evt_wsp['Faturamento Bruto'] - evt_wsp['Valor Recebido Cliente'])}
 
 Permanecemos à disposição!
 *Miguel Araújo Produções*"""
 
-        msg_editada = st.text_area("Mensagem Formatada (você pode editar antes de enviar):", value=msg_padrao, height=220)
+        msg_editada = st.text_area("Mensagem Formatada (você pode editar antes de enviar):", value=msg_padrao, height=180)
         
         if wsp_num:
             num_clean = "".join(filter(str.isdigit, wsp_num))
@@ -1433,18 +1420,18 @@ with aba8:
         with col_sel:
             evento_idx_pdf = st.selectbox(
                 "Selecione o Evento para gerar o PDF Comercial/Interno:", range(len(faturamentos)),
-                format_func=lambda x: f"[{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
+                format_func=lambda x: f"OS: {faturamentos[x].get('Numero NF', '')} - [{faturamentos[x].get('Status', 'Pendente')}] {faturamentos[x]['Cliente']} - {faturamentos[x]['Data Evento']}"
             )
         
         reg_sel = faturamentos[evento_idx_pdf]
         
         with col_btn1:
             pdf_orcamento = gerar_pdf_evento(reg_sel, tipo_documento="ORCAMENTO")
-            st.download_button("📄 Baixar ORÇAMENTO (Cliente)", data=pdf_orcamento, file_name=f"Orcamento_{reg_sel['Cliente']}.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button("📄 Baixar ORÇAMENTO (Cliente)", data=pdf_orcamento, file_name=f"Orcamento_OS_{reg_sel.get('Numero NF', '').replace('/', '_')}.pdf", mime="application/pdf", use_container_width=True)
 
         with col_btn2:
             pdf_financeiro = gerar_pdf_evento(reg_sel, tipo_documento="FINANCEIRO")
-            st.download_button("📊 Baixar CONTROLE (Interno)", data=pdf_financeiro, file_name=f"Controle_{reg_sel['Cliente']}.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button("📊 Baixar CONTROLE (Interno)", data=pdf_financeiro, file_name=f"Controle_OS_{reg_sel.get('Numero NF', '').replace('/', '_')}.pdf", mime="application/pdf", use_container_width=True)
 
         st.markdown("---")
         st.subheader("💾 Backup de Dados em Excel / CSV")
@@ -1478,10 +1465,10 @@ with aba8:
 
         st.dataframe(
             df_full[[
-                "id", "Cliente", "Data Evento", "Complexo / Local", "Status", "Numero NF", "Valor NF", "Aprovado", "Val. Extra", "Custo Reembolsos", "Responsável Imposto", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
+                "id", "Numero NF", "Cliente", "Data Evento", "Complexo / Local", "Status", "Valor NF", "Aprovado", "Val. Extra", "Custo Reembolsos", "Responsável Imposto", "Faturamento Bruto", "Valor Recebido Cliente", "Falta Receber (Cliente)",
                 "Status Recebimento", "Custos Operacionais + Logística", "Desc. Fornecedor Externo", "Custo Fornecedor Externo", "Valor Pago Equipe", "Falta Pagar (Equipe/Ext)", "Status Pagamento", "Lucro Real",
                 "Lucro Miguel Araújo", "Lucro Antonio Carlos"
-            ]],
+            ]].rename(columns={"Numero NF": "OS"}),
             use_container_width=True
         )
 
@@ -1536,7 +1523,7 @@ with aba9:
                     btn_lancar_abat = st.form_submit_button("🟢 Abater do Saldo Devedor", use_container_width=True)
                     if btn_lancar_abat:
                         if val_abat <= 0:
-                            st.error("Por favor, digite um valor válido maior que zero.")
+                            st.error("Por favor, por favor digite um valor válido maior que zero.")
                         else:
                             registrar_abatimento_fornecedor_db(
                                 fornecedor_id=forn_abat.get("id"),
