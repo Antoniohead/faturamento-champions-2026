@@ -238,12 +238,15 @@ def carregar_pagamentos_socios():
         return []
 
 def registrar_pagamento_socio_db(socio_nome, data_pag, valor, forma, evento_id, obs):
+    # Tratamento seguro caso venha None ou vazio ("Sem Vínculo")
+    ev_id_tratado = int(evento_id) if evento_id else None
+    
     payload = {
         "socio_nome": str(socio_nome),
         "data_pagamento": str(data_pag),
         "valor": safe_float(valor),
         "forma_pagamento": str(forma),
-        "evento_ref_id": int(evento_id) if evento_id else None,
+        "evento_ref_id": ev_id_tratado,
         "observacao": str(obs)
     }
     try:
@@ -1396,7 +1399,6 @@ with aba7:
         
         wsp_num = st.text_input("Número do WhatsApp (com DDD)", placeholder="Ex: 11999998888")
         
-        # Mensagem limpa sem valores detalhados conforme solicitado
         msg_padrao = f"""Olá, tudo bem? Segue o resumo do evento para *{evt_wsp['Cliente']}*:
 
 📋 *O.S.:* {evt_wsp.get('Numero NF', '')}
