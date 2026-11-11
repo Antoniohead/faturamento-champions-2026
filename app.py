@@ -628,7 +628,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# AJUSTE DE CSS: FORÇAR TEXTOS E DELTAS ESCUROS EM ELEMENTOS CLAROS OU REMOVER FUNDO BRANCO
+# AJUSTE DE CSS: FORÇAR CONTRASTE E REMOVER FUNDO BRANCO EM DELTAS
 st.markdown("""
     <style>
     .stApp { background-color: #1A1412; color: #FAF6EE; }
@@ -648,7 +648,7 @@ st.markdown("""
     }
     ::placeholder { color: #A09080 !important; opacity: 0.8 !important; }
     
-    /* CORREÇÃO DEFINITIVA DOS DELTAS (Caixas brancas com texto invisível) */
+    /* CORREÇÃO DOS DELTAS */
     div[data-testid="stMetricDelta"] {
         background-color: #2A201C !important;
         border: 1px solid #C5A059 !important;
@@ -715,7 +715,7 @@ fornecedores_cadastrados = carregar_fornecedores()
 pagamentos_fornecedores_lista = carregar_pagamentos_fornecedores()
 pagamentos_socios_lista = carregar_pagamentos_socios()
 
-# --- PAINEL GERAL DE INDICADORES (COM CÁLCULO DE FALTA RECEBER CORRIGIDO PARA APROVADOS) ---
+# --- PAINEL GERAL DE INDICADORES ---
 if faturamentos:
     df_kpi_raw = pd.DataFrame(faturamentos)
     clientes_unicos = sorted(list(set(df_kpi_raw["Cliente"].dropna().tolist())))
@@ -1377,19 +1377,47 @@ with aba7:
         
         wsp_num = st.text_input("Número do WhatsApp (com DDD)", placeholder="Ex: 11999998888")
         
-        msg_padrao = f"""Olá! Segue o resumo comercial do evento para *{evt_wsp['Cliente']}*:
+        incluir_orcamento = st.checkbox("📄 Incluir orçamento detalhado (Base + Extras + Impostos) na mensagem", value=True)
+        
+        extras_texto = ""
+        itens_extras_wsp = evt_wsp.get("Itens Extras", [])
+        if incluir_orcamento and itens_extras_wsp:
+            extras_texto = "\n*➕ Adicionais / Extras:* \n" + "".join([f"• {item.get('Descrição')}: {fmt_br(safe_float(item.get('Valor')))}\n" for item in itens_extras_wsp])
+
+        msg_padrao = f"""Olá, tudo bem? Segue o resumo comercial do evento para *{evt_wsp['Cliente']}*:
 
 📅 *Data do Evento:* {evt_wsp['Data Evento']} ({evt_wsp['Horário']})
 📍 *Local:* {evt_wsp['Complexo / Local']}
 📌 *Status da O.S.:* {evt_wsp.get('Status', 'Pendente')}
-💵 *Valor Global:* {fmt_br(evt_wsp['Faturamento Bruto'])}
+"""
+
+        if incluir_orcamento:
+            val_base_orc = safe_float(evt_wsp.get('Aprovado', 0))
+            val_extra_orc = safe_float(evt_wsp.get('Val. Extra', 0))
+            resp_imp_orc = evt_wsp.get('Responsável Imposto', 'Incluso no Valor')
+            val_imposto_orc = safe_float(evt_wsp.get('10% NF', 0))
+            
+            msg_padrao += f"""
+💵 *Composição do Orçamento:*
+• Valor Base: {fmt_br(val_base_orc)}"""
+            if val_extra_orc > 0:
+                msg_padrao += f"""
+• Adicionais/Extras: {fmt_br(val_extra_orc)}"""
+            if resp_imp_orc == "Por Conta do Cliente" and val_imposto_orc > 0:
+                msg_padrao += f"""
+• Impostos (10% NF): {fmt_br(val_imposto_orc)}"""
+            
+            msg_padrao += extras_texto
+
+        msg_padrao += f"""
+💰 *Valor Global Final:* {fmt_br(evt_wsp['Faturamento Bruto'])}
 📄 *NF Emitida:* {evt_wsp.get('Numero NF', 'Não emitida')} ({fmt_br(safe_float(evt_wsp.get('Valor NF', 0)))})
 ⏳ *Saldo Pendente:* {fmt_br(evt_wsp['Faturamento Bruto'] - evt_wsp['Valor Recebido Cliente'])}
 
 Permanecemos à disposição!
 *Miguel Araújo Produções*"""
 
-        msg_editada = st.text_area("Mensagem Formatada:", value=msg_padrao, height=180)
+        msg_editada = st.text_area("Mensagem Formatada (você pode editar antes de enviar):", value=msg_padrao, height=220)
         
         if wsp_num:
             num_clean = "".join(filter(str.isdigit, wsp_num))
