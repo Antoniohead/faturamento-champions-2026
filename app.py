@@ -78,6 +78,31 @@ def gerar_numero_os(data_str):
     except Exception:
         return data_str
 
+# --- BD RECEBIMENTOS CLIENTES (POR CLIENTE / SEM O.S.) ---
+def carregar_recebimentos_clientes():
+    try:
+        response = supabase.table("recebimentos_clientes").select("*").execute()
+        return response.data or []
+    except Exception:
+        return []
+
+def registrar_recebimento_cliente_db(cliente_nome, data_rec, valor, forma, obs):
+    payload = {
+        "cliente_nome": str(cliente_nome).strip(),
+        "data_recebimento": str(data_rec),
+        "valor": safe_float(valor),
+        "forma_pagamento": str(forma) if forma else "Pix",
+        "observacao": str(obs) if obs else ""
+    }
+    try:
+        supabase.table("recebimentos_clientes").insert(payload).execute()
+    except Exception as e:
+        st.error(f"DETALHE DO ERRO SUPABASE (Recebimentos): {str(e)}")
+        raise e
+
+def deletar_recebimento_cliente_db(id_rec):
+    supabase.table("recebimentos_clientes").delete().eq("id", id_rec).execute()
+
 def carregar_eventos():
     try:
         response = supabase.table("eventos").select("*").execute()
@@ -88,6 +113,7 @@ def carregar_eventos():
 
     eventos = []
     for d in rows:
+        ev_id = d.get("id")
         fat_bruto = safe_float(d.get("faturamento_bruto"))
         imp_nf = safe_float(d.get("imposto_nf"))
         custos_tot = safe_float(d.get("custos_total"))
@@ -106,9 +132,9 @@ def carregar_eventos():
         hist_pag_list = parse_json_safely(d.get("historico_pagamentos"))
 
         val_recebido_calc = sum(safe_float(r.get("Valor", 0.0)) for r in hist_rec_list)
-        val_pago_calc = sum(safe_float(p.get("Valor", 0.0)) for p in hist_pag_list)
-
         val_rec_final = val_recebido_calc if hist_rec_list else safe_float(d.get("val_recebido_cliente"))
+
+        val_pago_calc = sum(safe_float(p.get("Valor", 0.0)) for p in hist_pag_list)
         val_pago_final = val_pago_calc if hist_pag_list else safe_float(d.get("val_pago_equipe"))
 
         custo_reembolsos_total = sum(safe_float(r.get("Valor", 0.0)) for r in reembolsos_list)
@@ -135,7 +161,7 @@ def carregar_eventos():
         num_os_auto = gerar_numero_os(dt_ev_str) if not d.get("numero_nf") else d.get("numero_nf")
 
         eventos.append({
-            "id": d.get("id"),
+            "id": ev_id,
             "Cliente": d.get("cliente") or "Não informado",
             "Data Evento": dt_ev_str,
             "Horário": d.get("horario") or "",
@@ -254,7 +280,6 @@ def registrar_pagamento_socio_db(socio_nome, data_pag, valor, forma, evento_id, 
     try:
         supabase.table("pagamentos_socios").insert(payload).execute()
     except Exception as e:
-        # Exibe o erro real retornado pelo Supabase na tela para sabermos a causa exata
         st.error(f"DETALHE DO ERRO SUPABASE: {str(e)}")
         raise e
 
@@ -381,6 +406,18 @@ def gerar_excel_fornecedores(dados_forn, lista_pagamentos):
         if lista_pagamentos:
             df_p = pd.DataFrame(lista_pagamentos)
             df_p.to_excel(writer, index=False, sheet_name='Extrato_Pagamentos')
+    output.seek(0)
+    return output
+
+def gerar_excel_recebimentos(dados_cli, lista_recebimentos):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_c = pd.DataFrame(dados_cli)
+        df_c.to_excel(writer, index=False, sheet_name='Clientes_Saldos')
+        
+        if lista_recebimentos:
+            df_r = pd.DataFrame(lista_recebimentos)
+            df_r.to_excel(writer, index=False, sheet_name='Extrato_Recebimentos')
     output.seek(0)
     return output
 
@@ -735,6 +772,7 @@ with col_tit:
 st.markdown("---")
 
 faturamentos = carregar_eventos()
+recebimentos_clientes_lista = carregar_recebimentos_clientes()
 fornecedores_cadastrados = carregar_fornecedores()
 pagamentos_fornecedores_lista = carregar_pagamentos_fornecedores()
 pagamentos_socios_lista = carregar_pagamentos_socios()
@@ -757,6 +795,13 @@ if faturamentos:
     
     if cliente_selecionado_kpi != "Todos os Clientes (Consolidado Geral)":
         df_kpi = df_kpi[df_kpi["Cliente"] == cliente_selecionado_kpi]
+        recs_picados_kpi = sum(
+            safe_float(r.get("valor", 0.0))
+            for r in recebimentos_clientes_lista
+            if str(r.get("cliente_nome", "")).strip().lower() == cliente_selecionado_kpi.strip().lower()
+        )
+    else:
+        recs_picados_kpi = sum(safe_float(r.get("valor", 0.0)) for r in recebimentos_clientes_lista)
         
     if status_selecionado_kpi != "Todos os Status":
         df_kpi = df_kpi[df_kpi["Status"] == status_selecionado_kpi]
@@ -772,9 +817,9 @@ if faturamentos:
     total_custos_equipe = safe_float(df_kpi["Custos Operacionais + Logística"].sum())
     total_impostos = safe_float(df_kpi["10% NF"].sum())
     
-    total_recebido = safe_float(df_kpi["Valor Recebido Cliente"].sum())
+    total_recebido = safe_float(df_kpi["Valor Recebido Cliente"].sum()) + recs_picados_kpi
     
-    total_recebido_aprovados = safe_float(df_aprovados["Valor Recebido Cliente"].sum())
+    total_recebido_aprovados = safe_float(df_aprovados["Valor Recebido Cliente"].sum()) + recs_picados_kpi
     falta_receber_total = total_faturado_aprovado - total_recebido_aprovados
     
     total_abatimentos_geral = sum(safe_float(p.get("valor", 0.0)) for p in pagamentos_fornecedores_lista)
@@ -804,8 +849,9 @@ if faturamentos:
 
     st.markdown("---")
 
-aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8, aba9 = st.tabs([
+aba1, aba_rec, aba2, aba3, aba4, aba5, aba6, aba7, aba8, aba9 = st.tabs([
     "➕ Novo Evento",
+    "💵 Recebimentos Clientes",
     "✏️ Baixas & Edição",
     "🤝 Sócios & Lucros",
     "🗓️ Calendário",
@@ -982,6 +1028,149 @@ with aba1:
             st.success("✅ Evento cadastrado com sucesso no Supabase!")
             st.rerun()
 
+# ABA NOVA: RECEBIMENTOS CLIENTES (MESMO PRINCÍPIO DE FORNECEDORES - SEM O.S.)
+with aba_rec:
+    st.subheader("💵 Gestão de Recebimentos & Abatimento de Saldo por Cliente")
+    st.markdown("Lance os valores recebidos (sinais, parcelas ou pagamentos agrupados) diretamente na conta do cliente, sem necessidade de vincular a uma O.S. específica.")
+
+    if not faturamentos:
+        st.info("Nenhum evento cadastrado até o momento.")
+    else:
+        clientes_lista_unica = sorted(list(set(
+            str(e.get("Cliente", "")).strip()
+            for e in faturamentos
+            if str(e.get("Cliente", "")).strip() and str(e.get("Cliente", "")).strip() != "Não informado"
+        )))
+
+        if not clientes_lista_unica:
+            st.info("Nenhum cliente válido cadastrado nos eventos.")
+        else:
+            with st.expander("💸 Lançar Recebimento / Abatimento de Saldo do Cliente", expanded=True):
+                with st.form("form_novo_recebimento_cliente"):
+                    col_rc1, col_rc2, col_rc3 = st.columns(3)
+                    with col_rc1:
+                        cli_rec_sel = st.selectbox("Selecione o Cliente:", options=clientes_lista_unica)
+                        dt_rec_cli = st.date_input("Data do Recebimento", datetime.now(), key="dt_rec_cli_inp")
+                    with col_rc2:
+                        val_rec_cli = st.number_input("Valor Recebido (R$)", min_value=0.0, step=100.0, key="val_rec_cli_inp")
+                        forma_rec_cli = st.selectbox("Forma de Pagamento", ["Pix", "Transferência / TED", "Boleto", "Dinheiro", "Cartão", "Outro"], key="forma_rec_cli_inp")
+                    with col_rc3:
+                        obs_rec_cli = st.text_input("Observação / Referência", placeholder="Ex: Parcela 1, Sinal referente aos eventos do mês...", key="obs_rec_cli_inp")
+
+                    btn_lancar_rec_cli = st.form_submit_button("🟢 Registrar Recebimento do Cliente", use_container_width=True)
+                    if btn_lancar_rec_cli:
+                        if val_rec_cli <= 0:
+                            st.error("Por favor, digite um valor válido maior que zero.")
+                        else:
+                            registrar_recebimento_cliente_db(
+                                cliente_nome=cli_rec_sel,
+                                data_rec=dt_rec_cli.strftime("%d/%m/%Y"),
+                                valor=val_rec_cli,
+                                forma=forma_rec_cli,
+                                obs=obs_rec_cli
+                            )
+                            st.success(f"✅ Recebimento de {fmt_br(val_rec_cli)} registrado para **{cli_rec_sel}**!")
+                            st.rerun()
+
+            st.markdown("---")
+            st.markdown("### 📊 Painel de Saldo Devedor & Conta Corrente por Cliente")
+
+            dados_clientes_tabela = []
+            for cli_nome in clientes_lista_unica:
+                evs_cli = [e for e in faturamentos if str(e.get("Cliente", "")).strip().lower() == cli_nome.lower()]
+                evs_cli_aprov = [e for e in evs_cli if e.get("Status") == "Aprovado"]
+
+                total_faturado_cli = sum(safe_float(e.get("Faturamento Bruto", 0.0)) for e in evs_cli_aprov)
+                total_rec_legado_cli = sum(safe_float(e.get("Valor Recebido Cliente", 0.0)) for e in evs_cli)
+
+                recs_diretos_cli = [
+                    r for r in recebimentos_clientes_lista
+                    if str(r.get("cliente_nome", "")).strip().lower() == cli_nome.lower()
+                ]
+                total_rec_direto_cli = sum(safe_float(r.get("valor", 0.0)) for r in recs_diretos_cli)
+
+                total_recebido_geral_cli = total_rec_legado_cli + total_rec_direto_cli
+                saldo_a_receber = total_faturado_cli - total_recebido_geral_cli
+
+                if saldo_a_receber > 0:
+                    saldo_str = fmt_br(saldo_a_receber)
+                    status_cli = "🔴 Falta Receber"
+                elif saldo_a_receber < 0:
+                    saldo_str = f"Crédito Cliente: {fmt_br(abs(saldo_a_receber))}"
+                    status_cli = "🔵 Pago a Maior / Antecipado"
+                else:
+                    saldo_str = fmt_br(0.0)
+                    status_cli = "🟢 Quitado"
+
+                if total_faturado_cli == 0 and total_recebido_geral_cli == 0:
+                    status_cli = "🟡 Apenas Pendentes"
+
+                dados_clientes_tabela.append({
+                    "Cliente": cli_nome,
+                    "Eventos Aprovados": len(evs_cli_aprov),
+                    "Total Faturado (Aprov.)": fmt_br(total_faturado_cli),
+                    "Total Recebido": fmt_br(total_recebido_geral_cli),
+                    "⏳ Saldo a Receber": saldo_str,
+                    "Status": status_cli
+                })
+
+            df_cli_view = pd.DataFrame(dados_clientes_tabela)
+            st.dataframe(df_cli_view, use_container_width=True)
+
+            excel_rec_bytes = gerar_excel_recebimentos(dados_clientes_tabela, recebimentos_clientes_lista)
+            st.download_button(
+                "📥 Baixar Planilha de Clientes e Recebimentos em Excel (.xlsx)",
+                data=excel_rec_bytes,
+                file_name=f"Controle_Recebimentos_Clientes_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+            st.markdown("---")
+            st.markdown("### 📜 Extrato Detalhado de Recebimentos por Cliente")
+
+            cli_sel_extrato = st.selectbox(
+                "Selecione o Cliente para ver o extrato de recebimentos:",
+                options=["Todos os Clientes"] + clientes_lista_unica,
+                key="sel_extrato_cli"
+            )
+
+            if not recebimentos_clientes_lista:
+                st.info("Nenhum recebimento picado registrado ainda.")
+            else:
+                if cli_sel_extrato == "Todos os Clientes":
+                    recs_filtrados = recebimentos_clientes_lista
+                else:
+                    recs_filtrados = [
+                        r for r in recebimentos_clientes_lista
+                        if str(r.get("cliente_nome", "")).strip().lower() == cli_sel_extrato.lower()
+                    ]
+
+                if not recs_filtrados:
+                    st.info(f"Nenhum recebimento registrado para **{cli_sel_extrato}**.")
+                else:
+                    df_recs_f = pd.DataFrame(recs_filtrados)
+                    df_recs_f["Valor Formatado"] = df_recs_f["valor"].apply(fmt_br)
+
+                    st.dataframe(
+                        df_recs_f[["id", "cliente_nome", "data_recebimento", "Valor Formatado", "forma_pagamento", "observacao"]].rename(columns={
+                            "id": "ID",
+                            "cliente_nome": "Cliente",
+                            "data_recebimento": "Data",
+                            "Valor Formatado": "Valor Recebido",
+                            "forma_pagamento": "Forma",
+                            "observacao": "Observação"
+                        }),
+                        use_container_width=True
+                    )
+
+                    with st.expander("🗑️ Cancelar / Excluir um Lançamento de Recebimento"):
+                        id_rec_excluir = st.number_input("Digite o ID do recebimento a excluir:", min_value=1, step=1, key="del_rec_cli_inp")
+                        if st.button("Remover Recebimento", key="btn_del_rec_cli"):
+                            deletar_recebimento_cliente_db(id_rec_excluir)
+                            st.warning("🗑️ Lançamento de recebimento removido!")
+                            st.rerun()
+
 # ABA 2: EDITAR COMPLETO, REEMBOLSOS E BAIXAS PARCIAIS
 with aba2:
     st.subheader("✏️ Edição Completa, Baixas Parciais & Extrato de Caixa")
@@ -1110,7 +1299,7 @@ with aba2:
             )
 
             st.markdown("---")
-            st.markdown("#### 💳 7. Extrato e Lançamentos de Recebimentos Parciais (Cliente)")
+            st.markdown("#### 💳 7. Extrato e Lançamentos de Recebimentos Diretos nesta O.S. (Opcional)")
             
             hist_rec_existente = reg.get("Historico Recebimentos", [])
             df_hist_rec = pd.DataFrame(hist_rec_existente if hist_rec_existente else [{"Data": datetime.now().strftime("%d/%m/%Y"), "Valor": safe_float(reg.get("Valor Recebido Cliente")), "Forma": "Pix", "Obs": "Entrada Inicial"}])
@@ -1128,7 +1317,7 @@ with aba2:
             total_rec_calculado = safe_float(df_hist_rec_updated["Valor"].sum()) if not df_hist_rec_updated.empty else 0.0
             falta_receber_calc = e_fat_bruto_calc - total_rec_calculado
             
-            st.warning(f"**Situação de Caixa (Cliente):** Total Faturado: **{fmt_br(e_fat_bruto_calc)}** | Já Recebido: **{fmt_br(total_rec_calculado)}** | ⏳ **FALTA RECEBER: {fmt_br(falta_receber_calc)}**")
+            st.warning(f"**Situação desta O.S. (Cliente):** Total Faturado: **{fmt_br(e_fat_bruto_calc)}** | Recebido na O.S.: **{fmt_br(total_rec_calculado)}** | ⏳ **FALTA NESTA O.S.: {fmt_br(falta_receber_calc)}** *(Recebimentos gerais por cliente são abatidos na aba '💵 Recebimentos Clientes')*")
 
             st.markdown("---")
             st.markdown("#### 💸 8. Extrato e Lançamentos de Pagamentos Parciais (Equipe / Fornecedores / Reembolsos)")
@@ -1402,7 +1591,7 @@ with aba7:
         
         wsp_num = st.text_input("Número do WhatsApp (com DDD)", placeholder="Ex: 11999998888")
         
-        msg_padrao = f"""Olá, tudo bien? Segue o resumo do evento para *{evt_wsp['Cliente']}*:
+        msg_padrao = f"""Olá, tudo bem? Segue o resumo do evento para *{evt_wsp['Cliente']}*:
 
 📋 *O.S.:* {evt_wsp.get('Numero NF', '')}
 📅 *Data do Evento:* {evt_wsp['Data Evento']} ({evt_wsp['Horário']})
