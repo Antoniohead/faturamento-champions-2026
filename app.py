@@ -104,6 +104,30 @@ def registrar_recebimento_cliente_db(cliente_nome, data_rec, valor, forma, obs):
 def deletar_recebimento_cliente_db(id_rec):
     supabase.table("recebimentos_clientes").delete().eq("id", id_rec).execute()
 
+# --- BD STATUS MANUAL DOS CLIENTES ---
+def carregar_status_clientes():
+    try:
+        response = supabase.table("status_clientes").select("*").execute()
+        rows = response.data or []
+        return {str(r.get("cliente_nome", "")).strip(): str(r.get("status_manual", "")) for r in rows}
+    except Exception:
+        return {}
+
+def salvar_status_cliente_db(cliente_nome, status_manual):
+    nome_limpo = str(cliente_nome).strip()
+    try:
+        if status_manual == "Automático":
+            supabase.table("status_clientes").delete().eq("cliente_nome", nome_limpo).execute()
+        else:
+            supabase.table("status_clientes").upsert({
+                "cliente_nome": nome_limpo,
+                "status_manual": str(status_manual)
+            }).execute()
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar status do cliente ({nome_limpo}): {getattr(e, 'message', str(e))}")
+        return False
+
 def carregar_eventos():
     try:
         response = supabase.table("eventos").select("*").execute()
@@ -775,6 +799,7 @@ st.markdown("---")
 
 faturamentos = carregar_eventos()
 recebimentos_clientes_lista = carregar_recebimentos_clientes()
+status_clientes_mapa = carregar_status_clientes()
 fornecedores_cadastrados = carregar_fornecedores()
 pagamentos_fornecedores_lista = carregar_pagamentos_fornecedores()
 pagamentos_socios_lista = carregar_pagamentos_socios()
@@ -1076,6 +1101,7 @@ with aba_rec:
 
             st.markdown("---")
             st.markdown("### 📊 Painel de Saldo Devedor & Conta Corrente por Cliente")
+            st.caption("💡 Você pode clicar na coluna **Status** da tabela abaixo para alterar manualmente a situação do cliente e salvar.")
 
             dados_clientes_tabela = []
             for cli_nome in clientes_lista_unica:
@@ -1096,16 +1122,18 @@ with aba_rec:
 
                 if saldo_a_receber > 0:
                     saldo_str = fmt_br(saldo_a_receber)
-                    status_cli = "🔴 Falta Receber"
+                    status_auto = "🔴 Falta Receber"
                 elif saldo_a_receber < 0:
                     saldo_str = f"Crédito Cliente: {fmt_br(abs(saldo_a_receber))}"
-                    status_cli = "🔵 Pago a Maior / Antecipado"
+                    status_auto = "🔵 Pago a Maior / Antecipado"
                 else:
                     saldo_str = fmt_br(0.0)
-                    status_cli = "🟢 Quitado"
+                    status_auto = "🟢 Quitado"
 
                 if total_faturado_cli == 0 and total_recebido_geral_cli == 0:
-                    status_cli = "🟡 Apenas Pendentes"
+                    status_auto = "🟡 Apenas Pendentes"
+
+                status_final_cli = status_clientes_mapa.get(cli_nome) or status_auto
 
                 dados_clientes_tabela.append({
                     "Cliente": cli_nome,
@@ -1113,20 +1141,60 @@ with aba_rec:
                     "Total Faturado (Aprov.)": fmt_br(total_faturado_cli),
                     "Total Recebido": fmt_br(total_recebido_geral_cli),
                     "⏳ Saldo a Receber": saldo_str,
-                    "Status": status_cli
+                    "Status": status_final_cli
                 })
 
             df_cli_view = pd.DataFrame(dados_clientes_tabela)
-            st.dataframe(df_cli_view, use_container_width=True)
+            opcoes_status_cli = [
+                "🟢 Quitado",
+                "🔴 Falta Receber",
+                "🟡 Apenas Pendentes",
+                "🔵 Pago a Maior / Antecipado",
+                "🟠 Em Negociação / Acordo",
+                "Automático"
+            ]
 
-            excel_rec_bytes = gerar_excel_recebimentos(dados_clientes_tabela, recebimentos_clientes_lista)
-            st.download_button(
-                "📥 Baixar Planilha de Clientes e Recebimentos em Excel (.xlsx)",
-                data=excel_rec_bytes,
-                file_name=f"Controle_Recebimentos_Clientes_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
+            df_cli_editado = st.data_editor(
+                df_cli_view,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["Cliente", "Eventos Aprovados", "Total Faturado (Aprov.)", "Total Recebido", "⏳ Saldo a Receber"],
+                column_config={
+                    "Status": st.column_config.SelectboxColumn(
+                        "Status (Clique para trocar)",
+                        options=opcoes_status_cli,
+                        required=True
+                    )
+                },
+                key="editor_status_clientes"
             )
+
+            col_st_cli1, col_st_cli2 = st.columns(2)
+            with col_st_cli1:
+                if st.button("💾 Salvar Alterações de Status", use_container_width=True, key="btn_salvar_status_cli"):
+                    alterados = 0
+                    for idx_row, row_edit in df_cli_editado.iterrows():
+                        cli_r = row_edit["Cliente"]
+                        st_novo = row_edit["Status"]
+                        st_antigo = df_cli_view.loc[idx_row, "Status"]
+                        if st_novo != st_antigo:
+                            if salvar_status_cliente_db(cli_r, st_novo):
+                                alterados += 1
+                    if alterados > 0:
+                        st.success(f"✅ {alterados} status atualizado(s) com sucesso!")
+                        st.rerun()
+                    else:
+                        st.info("Nenhuma alteração de status foi feita na tabela.")
+
+            with col_st_cli2:
+                excel_rec_bytes = gerar_excel_recebimentos(df_cli_editado.to_dict("records"), recebimentos_clientes_lista)
+                st.download_button(
+                    "📥 Baixar Planilha de Clientes e Recebimentos em Excel (.xlsx)",
+                    data=excel_rec_bytes,
+                    file_name=f"Controle_Recebimentos_Clientes_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
 
             st.markdown("---")
             st.markdown("### 📜 Extrato Detalhado de Recebimentos por Cliente")
