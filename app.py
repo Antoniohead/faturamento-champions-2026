@@ -96,9 +96,10 @@ def registrar_recebimento_cliente_db(cliente_nome, data_rec, valor, forma, obs):
     }
     try:
         supabase.table("recebimentos_clientes").insert(payload).execute()
+        return True
     except Exception as e:
-        st.error(f"DETALHE DO ERRO SUPABASE (Recebimentos): {str(e)}")
-        raise e
+        st.error(f"DETALHE DO ERRO SUPABASE (Recebimentos): {getattr(e, 'message', str(e))}")
+        return False
 
 def deletar_recebimento_cliente_db(id_rec):
     supabase.table("recebimentos_clientes").delete().eq("id", id_rec).execute()
@@ -279,9 +280,10 @@ def registrar_pagamento_socio_db(socio_nome, data_pag, valor, forma, evento_id, 
 
     try:
         supabase.table("pagamentos_socios").insert(payload).execute()
+        return True
     except Exception as e:
-        st.error(f"DETALHE DO ERRO SUPABASE: {str(e)}")
-        raise e
+        st.error(f"DETALHE DO ERRO SUPABASE: {getattr(e, 'message', str(e))}")
+        return False
 
 def deletar_pagamento_socio_db(id_pag):
     supabase.table("pagamentos_socios").delete().eq("id", id_pag).execute()
@@ -1062,15 +1064,15 @@ with aba_rec:
                         if val_rec_cli <= 0:
                             st.error("Por favor, digite um valor válido maior que zero.")
                         else:
-                            registrar_recebimento_cliente_db(
+                            if registrar_recebimento_cliente_db(
                                 cliente_nome=cli_rec_sel,
                                 data_rec=dt_rec_cli.strftime("%d/%m/%Y"),
                                 valor=val_rec_cli,
                                 forma=forma_rec_cli,
                                 obs=obs_rec_cli
-                            )
-                            st.success(f"✅ Recebimento de {fmt_br(val_rec_cli)} registrado para **{cli_rec_sel}**!")
-                            st.rerun()
+                            ):
+                                st.success(f"✅ Recebimento de {fmt_br(val_rec_cli)} registrado para **{cli_rec_sel}**!")
+                                st.rerun()
 
             st.markdown("---")
             st.markdown("### 📊 Painel de Saldo Devedor & Conta Corrente por Cliente")
@@ -1477,16 +1479,16 @@ with aba3:
                     if valor_ps <= 0:
                         st.error("Digite um valor maior que zero.")
                     else:
-                        registrar_pagamento_socio_db(
+                        if registrar_pagamento_socio_db(
                             socio_nome=socio_dest,
                             data_pag=data_ps.strftime("%d/%m/%Y"),
                             valor=valor_ps,
                             forma=forma_ps,
                             evento_id=evt_ref_sel[1],
                             obs=obs_ps
-                        )
-                        st.success(f"✅ Transferência de {fmt_br(valor_ps)} registrada para {socio_dest}!")
-                        st.rerun()
+                        ):
+                            st.success(f"✅ Transferência de {fmt_br(valor_ps)} registrada para {socio_dest}!")
+                            st.rerun()
 
         st.markdown("---")
         st.markdown("### 📜 Extrato de Pagamentos Efetuados aos Sócios")
