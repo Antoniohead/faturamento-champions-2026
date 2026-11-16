@@ -1101,7 +1101,6 @@ with aba_rec:
 
             st.markdown("---")
             st.markdown("### 📊 Painel de Saldo Devedor & Conta Corrente por Cliente")
-            st.caption("💡 Você pode clicar na coluna **Status** da tabela abaixo para alterar manualmente a situação do cliente e salvar.")
 
             dados_clientes_tabela = []
             for cli_nome in clientes_lista_unica:
@@ -1145,56 +1144,52 @@ with aba_rec:
                 })
 
             df_cli_view = pd.DataFrame(dados_clientes_tabela)
-            opcoes_status_cli = [
-                "🟢 Quitado",
-                "🔴 Falta Receber",
-                "🟡 Apenas Pendentes",
-                "🔵 Pago a Maior / Antecipado",
-                "🟠 Em Negociação / Acordo",
-                "Automático"
-            ]
+            st.dataframe(df_cli_view, use_container_width=True, hide_index=True)
 
-            df_cli_editado = st.data_editor(
-                df_cli_view,
-                use_container_width=True,
-                hide_index=True,
-                disabled=["Cliente", "Eventos Aprovados", "Total Faturado (Aprov.)", "Total Recebido", "⏳ Saldo a Receber"],
-                column_config={
-                    "Status": st.column_config.SelectboxColumn(
-                        "Status (Clique para trocar)",
-                        options=opcoes_status_cli,
-                        required=True
-                    )
-                },
-                key="editor_status_clientes"
+            # --- CONTROLE DIRETO PARA TROCAR O STATUS DO CLIENTE ---
+            with st.expander("🔄 Alterar Status de um Cliente Manualmente", expanded=True):
+                with st.form("form_trocar_status_cliente"):
+                    col_st1, col_st2, col_st3 = st.columns([2, 2, 1])
+                    with col_st1:
+                        cli_para_status = st.selectbox(
+                            "Selecione o Cliente:",
+                            options=clientes_lista_unica,
+                            key="sel_cli_troca_status"
+                        )
+                    with col_st2:
+                        opcoes_status_cli = [
+                            "🟢 Quitado",
+                            "🔴 Falta Receber",
+                            "🟡 Apenas Pendentes",
+                            "🔵 Pago a Maior / Antecipado",
+                            "🟠 Em Negociação / Acordo",
+                            "Automático"
+                        ]
+                        status_atual_cli = status_clientes_mapa.get(cli_para_status, "🟢 Quitado")
+                        idx_st_cli = opcoes_status_cli.index(status_atual_cli) if status_atual_cli in opcoes_status_cli else 0
+                        novo_status_cli = st.selectbox(
+                            "Novo Status:",
+                            options=opcoes_status_cli,
+                            index=idx_st_cli,
+                            key="sel_novo_status_cli"
+                        )
+                    with col_st3:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        btn_salvar_st = st.form_submit_button("💾 Aplicar Status", use_container_width=True)
+
+                    if btn_salvar_st:
+                        if salvar_status_cliente_db(cli_para_status, novo_status_cli):
+                            st.success(f"✅ Status de **{cli_para_status}** alterado para **{novo_status_cli}**!")
+                            st.rerun()
+
+            excel_rec_bytes = gerar_excel_recebimentos(dados_clientes_tabela, recebimentos_clientes_lista)
+            st.download_button(
+                "📥 Baixar Planilha de Clientes e Recebimentos em Excel (.xlsx)",
+                data=excel_rec_bytes,
+                file_name=f"Controle_Recebimentos_Clientes_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
             )
-
-            col_st_cli1, col_st_cli2 = st.columns(2)
-            with col_st_cli1:
-                if st.button("💾 Salvar Alterações de Status", use_container_width=True, key="btn_salvar_status_cli"):
-                    alterados = 0
-                    for idx_row, row_edit in df_cli_editado.iterrows():
-                        cli_r = row_edit["Cliente"]
-                        st_novo = row_edit["Status"]
-                        st_antigo = df_cli_view.loc[idx_row, "Status"]
-                        if st_novo != st_antigo:
-                            if salvar_status_cliente_db(cli_r, st_novo):
-                                alterados += 1
-                    if alterados > 0:
-                        st.success(f"✅ {alterados} status atualizado(s) com sucesso!")
-                        st.rerun()
-                    else:
-                        st.info("Nenhuma alteração de status foi feita na tabela.")
-
-            with col_st_cli2:
-                excel_rec_bytes = gerar_excel_recebimentos(df_cli_editado.to_dict("records"), recebimentos_clientes_lista)
-                st.download_button(
-                    "📥 Baixar Planilha de Clientes e Recebimentos em Excel (.xlsx)",
-                    data=excel_rec_bytes,
-                    file_name=f"Controle_Recebimentos_Clientes_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
 
             st.markdown("---")
             st.markdown("### 📜 Extrato Detalhado de Recebimentos por Cliente")
